@@ -27,6 +27,43 @@ import Testing
     #expect(budget.used == 0)
 }
 
+@Test func budgetAppendChargesLiveCapacity() throws {
+    var budget = MemoryBudget(limit: 1_000)
+    var values: [UInt16] = []
+    try budget.append(contentsOf: [UInt16(1), 2, 3], to: &values)
+    #expect(budget.used == values.capacity * MemoryLayout<UInt16>.stride)
+    try budget.append(UInt16(4), to: &values)
+    #expect(budget.used == values.capacity * MemoryLayout<UInt16>.stride)
+    try budget.append(contentsOf: [UInt16](repeating: 5, count: 20), to: &values)
+    #expect(budget.used == values.capacity * MemoryLayout<UInt16>.stride)
+}
+
+@Test func budgetAppendChecksTransientPeakAndPreservesState() throws {
+    // Growing from capacity c to the requested target t needs c + t bytes at
+    // once; a limit one byte below that must fail without changing state.
+    var limited = MemoryBudget(limit: 1_000)
+    var candidate: [UInt8] = []
+    try limited.append(contentsOf: [UInt8](repeating: 1, count: 8), to: &candidate)
+    let oldCapacity = candidate.capacity
+    let required = candidate.count + oldCapacity + 1
+    let target = max(required, oldCapacity * 2)
+    let before = limited.used
+    #expect(before == oldCapacity)
+    limited = MemoryBudget(limit: before + target - 1)
+    try limited.reserve(bytes: before)
+    #expect(throws: JP2KError.limitExceeded(.memory)) {
+        try limited.append(contentsOf: [UInt8](repeating: 2, count: oldCapacity + 1), to: &candidate)
+    }
+    #expect(limited.used == before)
+    #expect(candidate.count == 8)
+    #expect(candidate.capacity == oldCapacity)
+
+    var enough = MemoryBudget(limit: before + target)
+    try enough.reserve(bytes: before)
+    try enough.append(contentsOf: [UInt8](repeating: 2, count: oldCapacity + 1), to: &candidate)
+    #expect(enough.used == candidate.capacity)
+}
+
 @Test func contextCountsAndBoundaries() throws {
     var limits = Limits()
     limits.maxPackets = 2

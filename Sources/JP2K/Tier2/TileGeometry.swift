@@ -40,12 +40,19 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  */
-// Ported from OpenJPEG v2.5.4: tcd.c: opj_tcd_init_tile, opj_tcd_code_block_dec_allocate; dwt.c: opj_dwt_getgain, opj_dwt_calc_explicit_stepsizes
+// Ported from OpenJPEG v2.5.4: tcd.c: opj_tcd_init_tile, opj_tcd_code_block_dec_allocate; dwt.c: opj_dwt_getgain, opj_dwt_calc_explicit_stepsizes; t2.c: opj_t2_read_packet_data
 struct CodeBlockSegment {
     var passes = 0
     var maxPasses = 0
     var length = 0
     var dataLength = 0
+    var pendingPasses = 0
+    var pendingLength = 0
+}
+struct CodeBlockPacketSegment: Equatable {
+    var layer: Int
+    var passes: Int
+    var length: Int
 }
 struct CodeBlock {
     var x0, y0, x1, y1: Int
@@ -55,6 +62,7 @@ struct CodeBlock {
     var segments: [CodeBlockSegment] = []
     var data: [UInt8] = []
     var totalPasses = 0
+    var packetSegments: [CodeBlockPacketSegment] = []
 }
 struct Precinct {
     var x0, y0, x1, y1: Int

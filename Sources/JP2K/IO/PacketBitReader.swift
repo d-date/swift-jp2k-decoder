@@ -34,18 +34,29 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  */
-// Ported from OpenJPEG v2.5.4: bio.c: opj_bio_bytein, opj_bio_getbit
-/// Reads packet-header bits with JPEG 2000 byte stuffing.
+// Ported from OpenJPEG v2.5.4: bio.c: opj_bio_init_dec, opj_bio_bytein, opj_bio_getbit, opj_bio_read, opj_bio_inalign
+/// Reads a bounded packet header with JPEG 2000 byte stuffing.
 struct PacketBitReader {
     let bytes: [UInt8]
-    private(set) var offset = 0
+    let range: Range<Int>
+    private(set) var offset: Int
     private var bit = 8
     private var previousWasFF = false
 
-    init(_ bytes: [UInt8]) { self.bytes = bytes }
+    init(_ bytes: [UInt8], range: Range<Int>) {
+        self.bytes = bytes
+        self.range = range
+        offset = range.lowerBound
+    }
+
+    init(_ bytes: [UInt8]) {
+        self.init(bytes, range: 0..<bytes.count)
+    }
 
     mutating func readBit() throws(JP2KError) -> Int {
-        if offset >= bytes.count { throw .invalidCodestream(.truncated) }
+        if offset < 0 || offset >= range.upperBound || offset >= bytes.count || range.lowerBound < 0 {
+            throw .invalidCodestream(.badPacketHeader)
+        }
         if bit == 8 { bit = previousWasFF ? 6 : 7 }
         let value = Int((bytes[offset] >> bit) & 1)
         if bit == 0 {
@@ -54,5 +65,32 @@ struct PacketBitReader {
             bit = 8
         } else { bit -= 1 }
         return value
+    }
+
+    mutating func read(bits count: Int) throws(JP2KError) -> Int {
+        if count < 1 || count > 32 { throw .invalidCodestream(.badPacketHeader) }
+        var result = 0
+        for _ in 0..<count { result = (result << 1) | (try readBit()) }
+        return result
+    }
+
+    mutating func alignAndFinish() throws(JP2KError) -> Int {
+        if bit != 8 {
+            if offset < 0 || offset >= range.upperBound || offset >= bytes.count {
+                throw .invalidCodestream(.badPacketHeader)
+            }
+            previousWasFF = bytes[offset] == 0xFF
+            offset = try Checked.add(offset, 1)
+            bit = 8
+        }
+        // bio_inalign consumes the stuffed byte after a terminal 0xFF.
+        if previousWasFF {
+            if offset < 0 || offset >= range.upperBound || offset >= bytes.count {
+                throw .invalidCodestream(.badPacketHeader)
+            }
+            offset = try Checked.add(offset, 1)
+            previousWasFF = false
+        }
+        return try Checked.sub(offset, range.lowerBound)
     }
 }

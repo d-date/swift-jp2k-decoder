@@ -40,7 +40,7 @@ private func geometry(_ name: String, limits: Limits = Limits()) throws -> [Tile
     #expect(throws: JP2KError.invalidCodestream(.badPacketHeader)) {
         try tree.decode(&bits, leaf: 1, threshold: 1)
     }
-    #expect(throws: JP2KError.invalidCodestream(.truncated)) {
+    #expect(throws: JP2KError.invalidCodestream(.badPacketHeader)) {
         try tree.decode(&bits, leaf: 0, threshold: 1)
     }
 }
@@ -278,5 +278,5 @@ private func checkGeometry(_ geometry: TileGeometry, componentRect: [Int],
 @Test func packetBitReaderHandlesStuffingAndTruncation() throws {
     var bits = PacketBitReader([0xFF, 0x7F])
     for _ in 0..<15 { #expect(try bits.readBit() == 1) }
-    #expect(throws: JP2KError.invalidCodestream(.truncated)) { try bits.readBit() }
+    #expect(throws: JP2KError.invalidCodestream(.badPacketHeader)) { try bits.readBit() }
 }

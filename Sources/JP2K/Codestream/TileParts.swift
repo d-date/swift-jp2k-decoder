@@ -170,27 +170,15 @@ enum TilePartParser {
                 }
             }
             let bodyLength = try Checked.sub(bodyEnd, reader.offset)
-            try context.budget.reserve(bytes: bodyLength)
-            let existingBodyBytes = state.data.body.count
-            try context.budget.reserve(bytes: existingBodyBytes)
-            state.data.body.reserveCapacity(try Checked.add(existingBodyBytes, bodyLength))
-            state.data.body.append(contentsOf: try reader.bytes(count: bodyLength))
-            context.budget.release(bytes: existingBodyBytes)
+            try context.budget.append(contentsOf: reader.bytes(count: bodyLength), to: &state.data.body)
             state.data.tilePartCount = try Checked.add(state.data.tilePartCount, 1)
             if !header.ppm.isEmpty {
                 if ppmPosition >= ppmChunks.count { throw .invalidCodestream(.badPPM) }
                 let chunk = ppmChunks[ppmPosition]
                 ppmPosition = try Checked.add(ppmPosition, 1)
-                // As with the body: growth may briefly hold old and new
-                // storage, so the existing bytes are charged until it settles.
                 var headers = state.data.packedPacketHeaders ?? []
                 state.data.packedPacketHeaders = nil
-                let existingHeaderBytes = headers.count
-                try context.budget.reserve(bytes: chunk.count)
-                try context.budget.reserve(bytes: existingHeaderBytes)
-                headers.reserveCapacity(try Checked.add(existingHeaderBytes, chunk.count))
-                headers.append(contentsOf: chunk)
-                context.budget.release(bytes: existingHeaderBytes)
+                try context.budget.append(contentsOf: chunk, to: &headers)
                 state.data.packedPacketHeaders = headers
             }
             states[index] = state

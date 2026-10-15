@@ -78,6 +78,10 @@ struct TagTree {
         }
     }
 
+    func storageBytes() throws(JP2KError) -> Int {
+        try Checked.mul(nodes.count, MemoryLayout<TagNode>.stride)
+    }
+
     mutating func reset() {
         for index in nodes.indices { nodes[index].value = 999; nodes[index].low = 0 }
     }
