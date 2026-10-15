@@ -1,2 +1,94 @@
 JP2KDecoder | struct JP2KDecoder
 JP2KDecoder.init() | init()
+JP2KError | enum JP2KError
+JP2KError.!=(_:_:) | static func != (lhs: borrowing Self, rhs: borrowing Self) -> Bool
+JP2KError.Feature | struct Feature
+JP2KError.Feature.!=(_:_:) | static func != (lhs: borrowing Self, rhs: borrowing Self) -> Bool
+JP2KError.Feature.bitDepthAbove16 | static let bitDepthAbove16: JP2KError.Feature
+JP2KError.Feature.colourSpace | static let colourSpace: JP2KError.Feature
+JP2KError.Feature.componentCount | static let componentCount: JP2KError.Feature
+JP2KError.Feature.hash(into:) | func hash(into hasher: inout Hasher)
+JP2KError.Feature.hashValue | var hashValue: Int { get }
+JP2KError.Feature.htj2k | static let htj2k: JP2KError.Feature
+JP2KError.Feature.iccProfile | static let iccProfile: JP2KError.Feature
+JP2KError.Feature.init(rawValue:) | init(rawValue: String)
+JP2KError.Feature.part2 | static let part2: JP2KError.Feature
+JP2KError.Feature.rawValue | let rawValue: String
+JP2KError.Feature.unspecifiedColour | static let unspecifiedColour: JP2KError.Feature
+JP2KError.Limit | struct Limit
+JP2KError.Limit.!=(_:_:) | static func != (lhs: borrowing Self, rhs: borrowing Self) -> Bool
+JP2KError.Limit.bitDepth | static let bitDepth: JP2KError.Limit
+JP2KError.Limit.codingPasses | static let codingPasses: JP2KError.Limit
+JP2KError.Limit.components | static let components: JP2KError.Limit
+JP2KError.Limit.hash(into:) | func hash(into hasher: inout Hasher)
+JP2KError.Limit.hashValue | var hashValue: Int { get }
+JP2KError.Limit.init(rawValue:) | init(rawValue: String)
+JP2KError.Limit.inputBytes | static let inputBytes: JP2KError.Limit
+JP2KError.Limit.layers | static let layers: JP2KError.Limit
+JP2KError.Limit.markerData | static let markerData: JP2KError.Limit
+JP2KError.Limit.memory | static let memory: JP2KError.Limit
+JP2KError.Limit.packets | static let packets: JP2KError.Limit
+JP2KError.Limit.pixels | static let pixels: JP2KError.Limit
+JP2KError.Limit.rawValue | let rawValue: String
+JP2KError.Limit.tileParts | static let tileParts: JP2KError.Limit
+JP2KError.Limit.tiles | static let tiles: JP2KError.Limit
+JP2KError.Reason | struct Reason
+JP2KError.Reason.!=(_:_:) | static func != (lhs: borrowing Self, rhs: borrowing Self) -> Bool
+JP2KError.Reason.arithmeticOverflow | static let arithmeticOverflow: JP2KError.Reason
+JP2KError.Reason.badBoxLength | static let badBoxLength: JP2KError.Reason
+JP2KError.Reason.badCOC | static let badCOC: JP2KError.Reason
+JP2KError.Reason.badCOD | static let badCOD: JP2KError.Reason
+JP2KError.Reason.badChannelDefinition | static let badChannelDefinition: JP2KError.Reason
+JP2KError.Reason.badCodeBlock | static let badCodeBlock: JP2KError.Reason
+JP2KError.Reason.badColourSpecification | static let badColourSpecification: JP2KError.Reason
+JP2KError.Reason.badComponentMapping | static let badComponentMapping: JP2KError.Reason
+JP2KError.Reason.badFileType | static let badFileType: JP2KError.Reason
+JP2KError.Reason.badMarker | static let badMarker: JP2KError.Reason
+JP2KError.Reason.badMarkerLength | static let badMarkerLength: JP2KError.Reason
+JP2KError.Reason.badPOC | static let badPOC: JP2KError.Reason
+JP2KError.Reason.badPPM | static let badPPM: JP2KError.Reason
+JP2KError.Reason.badPPT | static let badPPT: JP2KError.Reason
+JP2KError.Reason.badPacketHeader | static let badPacketHeader: JP2KError.Reason
+JP2KError.Reason.badPalette | static let badPalette: JP2KError.Reason
+JP2KError.Reason.badQCC | static let badQCC: JP2KError.Reason
+JP2KError.Reason.badQCD | static let badQCD: JP2KError.Reason
+JP2KError.Reason.badRGN | static let badRGN: JP2KError.Reason
+JP2KError.Reason.badSIZ | static let badSIZ: JP2KError.Reason
+JP2KError.Reason.badSOT | static let badSOT: JP2KError.Reason
+JP2KError.Reason.badSignature | static let badSignature: JP2KError.Reason
+JP2KError.Reason.badTilePart | static let badTilePart: JP2KError.Reason
+JP2KError.Reason.duplicateBox | static let duplicateBox: JP2KError.Reason
+JP2KError.Reason.hash(into:) | func hash(into hasher: inout Hasher)
+JP2KError.Reason.hashValue | var hashValue: Int { get }
+JP2KError.Reason.headerMismatch | static let headerMismatch: JP2KError.Reason
+JP2KError.Reason.init(rawValue:) | init(rawValue: String)
+JP2KError.Reason.missingCodestream | static let missingCodestream: JP2KError.Reason
+JP2KError.Reason.missingEOC | static let missingEOC: JP2KError.Reason
+JP2KError.Reason.missingHeaderBox | static let missingHeaderBox: JP2KError.Reason
+JP2KError.Reason.missingImageHeader | static let missingImageHeader: JP2KError.Reason
+JP2KError.Reason.missingSIZ | static let missingSIZ: JP2KError.Reason
+JP2KError.Reason.missingSOC | static let missingSOC: JP2KError.Reason
+JP2KError.Reason.rawValue | let rawValue: String
+JP2KError.Reason.specRange | static let specRange: JP2KError.Reason
+JP2KError.Reason.truncated | static let truncated: JP2KError.Reason
+JP2KError.Reason.unexpectedMarker | static let unexpectedMarker: JP2KError.Reason
+JP2KError.inputSize | case inputSize
+JP2KError.invalidCodestream(_:) | case invalidCodestream(Reason)
+JP2KError.invalidContainer(_:) | case invalidContainer(Reason)
+JP2KError.limitExceeded(_:) | case limitExceeded(Limit)
+JP2KError.regionOutOfBounds | case regionOutOfBounds
+JP2KError.unsupported(_:) | case unsupported(Feature)
+Limits | struct Limits
+Limits.!=(_:_:) | static func != (lhs: borrowing Self, rhs: borrowing Self) -> Bool
+Limits.init() | init()
+Limits.maxBitDepth | var maxBitDepth: Int { get set }
+Limits.maxCodingPasses | var maxCodingPasses: Int
+Limits.maxComponents | var maxComponents: Int
+Limits.maxInputBytes | var maxInputBytes: Int
+Limits.maxLayers | var maxLayers: Int
+Limits.maxMarkerDataBytes | var maxMarkerDataBytes: Int
+Limits.maxMemoryBytes | var maxMemoryBytes: Int
+Limits.maxPackets | var maxPackets: Int
+Limits.maxPixels | var maxPixels: Int
+Limits.maxTileParts | var maxTileParts: Int
+Limits.maxTiles | var maxTiles: Int
