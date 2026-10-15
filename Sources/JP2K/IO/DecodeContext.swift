@@ -3,6 +3,7 @@ struct DecodeContext {
     let limits: Limits
     var budget: MemoryBudget
     private(set) var packets: Int = 0
+    private(set) var packetWork: Int = 0
     private(set) var codingPasses: Int = 0
     private(set) var markerDataBytes: Int = 0
 
@@ -13,6 +14,12 @@ struct DecodeContext {
 
     mutating func countPacket() throws(JP2KError) {
         try count(1, current: &packets, maximum: limits.maxPackets, kind: .packets)
+    }
+
+    mutating func countPacketWork() throws(JP2KError) {
+        let (scaled, overflow) = limits.maxPackets.multipliedReportingOverflow(by: 16)
+        let maximum = max(1_000_000, overflow ? Int.max : scaled)
+        try count(1, current: &packetWork, maximum: maximum, kind: .packetIteration)
     }
 
     mutating func countCodingPasses(_ n: Int) throws(JP2KError) {

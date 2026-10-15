@@ -54,6 +54,7 @@ JP2KError.Limit.inputBytes | static let inputBytes: JP2KError.Limit
 JP2KError.Limit.layers | static let layers: JP2KError.Limit
 JP2KError.Limit.markerData | static let markerData: JP2KError.Limit
 JP2KError.Limit.memory | static let memory: JP2KError.Limit
+JP2KError.Limit.packetIteration | static let packetIteration: JP2KError.Limit
 JP2KError.Limit.packets | static let packets: JP2KError.Limit
 JP2KError.Limit.pixels | static let pixels: JP2KError.Limit
 JP2KError.Limit.rawValue | let rawValue: String

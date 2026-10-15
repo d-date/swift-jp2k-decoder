@@ -25,3 +25,5 @@
 | Sources/JP2K/Tier2/TagTree.swift | TagTree.decode | src/lib/openjp2/tgt.c | opj_tgt_decode |
 | Sources/JP2K/Tier2/TileGeometry.swift | TileGeometryBuilder.build | src/lib/openjp2/tcd.c | opj_tcd_init_tile, opj_tcd_code_block_dec_allocate |
 | Sources/JP2K/Tier2/TileGeometry.swift | TileGeometryBuilder.quantStep | src/lib/openjp2/tcd.c, src/lib/openjp2/dwt.c | opj_tcd_init_tile, opj_dwt_getgain, opj_dwt_calc_explicit_stepsizes |
+| Sources/JP2K/Tier2/PacketIterator.swift | PacketIterator.positions | src/lib/openjp2/pi.c | opj_pi_create_decode, opj_get_all_encoding_parameters, opj_pi_update_decode_poc, opj_pi_update_decode_not_poc |
+| Sources/JP2K/Tier2/PacketIterator.swift | PacketState.walk, PacketState.walkSpatial | src/lib/openjp2/pi.c | opj_pi_next, opj_pi_next_lrcp, opj_pi_next_rlcp, opj_pi_next_rpcl, opj_pi_next_pcrl, opj_pi_next_cprl |

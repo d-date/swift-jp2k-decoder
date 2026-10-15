@@ -60,6 +60,7 @@ public enum JP2KError: Error, Sendable, Equatable {
         public static let layers = Self(rawValue: "layers")
         public static let memory = Self(rawValue: "memory")
         public static let packets = Self(rawValue: "packets")
+        public static let packetIteration = Self(rawValue: "packetIteration")
         public static let codingPasses = Self(rawValue: "codingPasses")
         public static let markerData = Self(rawValue: "markerData")
     }

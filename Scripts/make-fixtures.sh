@@ -3,6 +3,8 @@ set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
 out="$root/Tests/JP2KTests/Fixtures"
+# Packet-order text references are regenerated separately with
+# Scripts/make-packet-orders.sh, which instruments OpenJPEG's decoder.
 compress="${OPJ_COMPRESS:-/opt/homebrew/bin/opj_compress}"
 decompress="${OPJ_DECOMPRESS:-/opt/homebrew/bin/opj_decompress}"
 for tool in "$compress" "$decompress"; do
