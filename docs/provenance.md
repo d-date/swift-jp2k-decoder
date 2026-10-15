@@ -19,3 +19,9 @@
 | Sources/JP2K/Codestream/TileParts.swift | TilePartParser.parse | src/lib/openjp2/j2k.c | opj_j2k_get_sot_values, opj_j2k_read_sot, opj_j2k_read_sod, opj_j2k_read_plt |
 | Sources/JP2K/Codestream/TileParts.swift | TilePartParser.mergePPM | src/lib/openjp2/j2k.c | opj_j2k_read_ppm, opj_j2k_merge_ppm |
 | Sources/JP2K/Codestream/TileParts.swift | TilePartParser.apply | src/lib/openjp2/j2k.c | opj_j2k_read_ppt, opj_j2k_merge_ppt, opj_j2k_read_cod, opj_j2k_read_coc, opj_j2k_read_qcd, opj_j2k_read_qcc, opj_j2k_read_rgn, opj_j2k_read_poc |
+| Sources/JP2K/IO/PacketBitReader.swift | PacketBitReader.readBit | src/lib/openjp2/bio.c | opj_bio_bytein, opj_bio_getbit |
+| Sources/JP2K/Tier2/TagTree.swift | TagTree.init | src/lib/openjp2/tgt.c | opj_tgt_create |
+| Sources/JP2K/Tier2/TagTree.swift | TagTree.reset | src/lib/openjp2/tgt.c | opj_tgt_reset |
+| Sources/JP2K/Tier2/TagTree.swift | TagTree.decode | src/lib/openjp2/tgt.c | opj_tgt_decode |
+| Sources/JP2K/Tier2/TileGeometry.swift | TileGeometryBuilder.build | src/lib/openjp2/tcd.c | opj_tcd_init_tile, opj_tcd_code_block_dec_allocate |
+| Sources/JP2K/Tier2/TileGeometry.swift | TileGeometryBuilder.quantStep | src/lib/openjp2/tcd.c, src/lib/openjp2/dwt.c | opj_tcd_init_tile, opj_dwt_getgain, opj_dwt_calc_explicit_stepsizes |

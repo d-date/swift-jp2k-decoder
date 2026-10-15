@@ -39,7 +39,7 @@ for path in sorted((repo / "Sources").rglob("*.swift")):
     if mode == "--fix" and current:
         first, last = current[0], current[-1]
         lines[first:last + 1] = expected
-        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        path.write_text("\n".join(lines).rstrip("\n") + "\n", encoding="utf-8")
         print(f"fixed {path.relative_to(repo)}")
     else:
         print(f"mismatch {path.relative_to(repo)}", file=sys.stderr)
