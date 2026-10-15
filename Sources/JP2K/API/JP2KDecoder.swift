@@ -1,4 +1,83 @@
-/// A decoder entry point. Decoding methods are added in later milestones.
+/// A decoder entry point.
 public struct JP2KDecoder: Sendable {
-    public init() {}
+    public var limits: Limits
+
+    public init(limits: Limits = Limits()) { self.limits = limits }
+
+    public func readInfo(_ bytes: Span<UInt8>) throws(JP2KError) -> ImageInfo {
+        if bytes.count < 12 || bytes.count > limits.maxInputBytes { throw .inputSize }
+        var context = DecodeContext(limits: limits)
+        try context.budget.reserve(bytes: bytes.count)
+        var input: [UInt8] = []
+        input.reserveCapacity(bytes.count)
+        for index in 0..<bytes.count { input.append(bytes[index]) }
+        return try readInfoArray(input, context: &context)
+    }
+
+    private func readInfoArray(_ input: [UInt8], context: inout DecodeContext) throws(JP2KError) -> ImageInfo {
+        let format = try FormatDetector.detect(input)
+        let file: JP2File?
+        let range: Range<Int>
+        switch format {
+        case .jp2:
+            let parsed = try JP2Parser.parse(input, context: &context)
+            file = parsed
+            range = parsed.codestream
+        case .codestream:
+            file = nil
+            range = 0..<input.count
+        }
+        let header = try MainHeaderParser.parse(input, range: range, context: &context)
+        let geometry = header.geometry
+        let width = try Checked.sub(geometry.x1, geometry.x0)
+        let height = try Checked.sub(geometry.y1, geometry.y0)
+        if let file {
+            let image = file.header.imageHeader
+            if image.width != width || image.height != height || image.nc != geometry.components.count {
+                throw .invalidContainer(.headerMismatch)
+            }
+            for index in geometry.components.indices {
+                let component = geometry.components[index]
+                let descriptor = UInt8(component.precision - 1) | (component.isSigned ? 0x80 : 0)
+                if image.bpc == 255 {
+                    guard let bpcc = file.header.bitsPerComponent, index < bpcc.count, bpcc[index] == descriptor else {
+                        throw .invalidContainer(.headerMismatch)
+                    }
+                } else if image.bpc != descriptor { throw .invalidContainer(.headerMismatch) }
+            }
+        }
+        try context.budget.reserve(bytes: try Checked.mul(geometry.components.count, MemoryLayout<ComponentInfo>.stride))
+        var components: [ComponentInfo] = []
+        components.reserveCapacity(geometry.components.count)
+        for component in geometry.components {
+            let x0 = try Checked.ceilDiv(geometry.x0, component.dx)
+            let y0 = try Checked.ceilDiv(geometry.y0, component.dy)
+            let x1 = try Checked.ceilDiv(geometry.x1, component.dx)
+            let y1 = try Checked.ceilDiv(geometry.y1, component.dy)
+            components.append(ComponentInfo(x0: x0, y0: y0, width: try Checked.sub(x1, x0),
+                                            height: try Checked.sub(y1, y0), dx: component.dx,
+                                            dy: component.dy, precision: component.precision,
+                                            isSigned: component.isSigned))
+        }
+        let color: ColorSpace
+        if let file {
+            switch file.header.colour {
+            case .enumerated(16): color = .sRGB
+            case .enumerated(17): color = .grayscale
+            case .enumerated(18): color = .sYCC
+            case .enumerated(let value): color = .other(value)
+            case .restrictedICC: color = .icc
+            case .other: color = .unspecified
+            }
+        } else { color = .unspecified }
+        return ImageInfo(width: width, height: height, components: components,
+                         colorSpace: color, isJP2Container: file != nil)
+    }
+
+    public func readInfo(_ bytes: [UInt8]) throws(JP2KError) -> ImageInfo {
+        if bytes.count < 12 || bytes.count > limits.maxInputBytes { throw .inputSize }
+        var context = DecodeContext(limits: limits)
+        try context.budget.reserve(bytes: bytes.count)
+        return try readInfoArray(bytes, context: &context)
+    }
 }

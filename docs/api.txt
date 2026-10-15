@@ -1,5 +1,32 @@
+ColorSpace | enum ColorSpace
+ColorSpace.!=(_:_:) | static func != (lhs: borrowing Self, rhs: borrowing Self) -> Bool
+ColorSpace.grayscale | case grayscale
+ColorSpace.icc | case icc
+ColorSpace.other(_:) | case other(UInt32)
+ColorSpace.sRGB | case sRGB
+ColorSpace.sYCC | case sYCC
+ColorSpace.unspecified | case unspecified
+ComponentInfo | struct ComponentInfo
+ComponentInfo.!=(_:_:) | static func != (lhs: borrowing Self, rhs: borrowing Self) -> Bool
+ComponentInfo.dx | let dx: Int
+ComponentInfo.dy | let dy: Int
+ComponentInfo.height | let height: Int
+ComponentInfo.isSigned | let isSigned: Bool
+ComponentInfo.precision | let precision: Int
+ComponentInfo.width | let width: Int
+ComponentInfo.x0 | let x0: Int
+ComponentInfo.y0 | let y0: Int
+ImageInfo | struct ImageInfo
+ImageInfo.colorSpace | let colorSpace: ColorSpace
+ImageInfo.components | let components: [ComponentInfo]
+ImageInfo.height | let height: Int
+ImageInfo.isJP2Container | let isJP2Container: Bool
+ImageInfo.width | let width: Int
 JP2KDecoder | struct JP2KDecoder
-JP2KDecoder.init() | init()
+JP2KDecoder.init(limits:) | init(limits: Limits = Limits())
+JP2KDecoder.limits | var limits: Limits
+JP2KDecoder.readInfo(_:) | func readInfo(_ bytes: Span<UInt8>) throws(JP2KError) -> ImageInfo
+JP2KDecoder.readInfo(_:) | func readInfo(_ bytes: [UInt8]) throws(JP2KError) -> ImageInfo
 JP2KError | enum JP2KError
 JP2KError.!=(_:_:) | static func != (lhs: borrowing Self, rhs: borrowing Self) -> Bool
 JP2KError.Feature | struct Feature

@@ -5,3 +5,13 @@
 | Sources/JP2K/Container/JP2Header.swift | JP2Header.readImageHeader | src/lib/openjp2/jp2.c | opj_jp2_read_ihdr |
 | Sources/JP2K/Container/JP2Header.swift | JP2Header.parse | src/lib/openjp2/jp2.c | opj_jp2_read_bpcc, opj_jp2_read_colr, opj_jp2_read_pclr, opj_jp2_read_cmap, opj_jp2_read_cdef |
 | Sources/JP2K/Container/JP2Header.swift | JP2Header.validate | src/lib/openjp2/jp2.c | opj_jp2_check_color |
+| Sources/JP2K/Codestream/Markers.swift | Marker | src/lib/openjp2/j2k.c | opj_j2k_dec_mstab_lookup |
+| Sources/JP2K/Codestream/SIZ.swift | ImageGeometry.parse | src/lib/openjp2/j2k.c | opj_j2k_read_siz |
+| Sources/JP2K/Codestream/CodingStyle.swift | CodingStyle.parse | src/lib/openjp2/j2k.c | opj_j2k_read_cod |
+| Sources/JP2K/Codestream/CodingStyle.swift | CodingStyle.parseCOC | src/lib/openjp2/j2k.c | opj_j2k_read_coc |
+| Sources/JP2K/Codestream/CodingStyle.swift | ComponentCodingStyle.parse | src/lib/openjp2/j2k.c | opj_j2k_read_SPCod_SPCoc |
+| Sources/JP2K/Codestream/Quantization.swift | QuantizationStyle.parse | src/lib/openjp2/j2k.c | opj_j2k_read_qcd, opj_j2k_read_SQcd_SQcc |
+| Sources/JP2K/Codestream/Quantization.swift | QuantizationStyle.parseQCC | src/lib/openjp2/j2k.c | opj_j2k_read_qcc |
+| Sources/JP2K/Codestream/ROI.swift | ROI.parse | src/lib/openjp2/j2k.c | opj_j2k_read_rgn |
+| Sources/JP2K/Codestream/Progression.swift | Progression.parse | src/lib/openjp2/j2k.c | opj_j2k_read_poc |
+| Sources/JP2K/Codestream/MainHeader.swift | MainHeaderParser.parse | src/lib/openjp2/j2k.c | opj_j2k_read_header_procedure, opj_j2k_read_ppm, opj_j2k_read_tlm, opj_j2k_read_plm, opj_j2k_read_crg, opj_j2k_read_com |
