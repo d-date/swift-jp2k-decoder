@@ -1,0 +1,43 @@
+name: Extended checks
+# Manual only (private repository). The fuzz harness and benchmark body are
+# added by later work; until then these jobs are expected to fail or no-op.
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: extended-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fuzz:
+    timeout-minutes: 300
+    runs-on: ubuntu-24.04
+    container: swift:6.4-noble
+    steps:
+      - uses: actions/checkout@v4
+      - name: Long fuzz run
+        run: |
+          bash Fuzz/build.sh
+          bash Fuzz/run.sh 14400
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fuzz-artifacts
+          path: Fuzz/artifacts
+
+  benchmark:
+    timeout-minutes: 300
+    runs-on: ubuntu-24.04
+    container: swift:6.4-noble
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: .conformance-data
+          key: openjpeg-data-39524bd3a601d90ed8e0177559400d23945f96a9
+      - name: Fetch conformance data
+        run: bash Scripts/fetch-conformance.sh .conformance-data
+      - name: Benchmark
+        env:
+          JP2K_CONFORMANCE_DIR: ${{ github.workspace }}/.conformance-data
+        run: swift run -c release jp2k-bench

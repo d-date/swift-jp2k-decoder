@@ -1,0 +1,176 @@
+name: CI
+# Push runs only on main; branches are covered by their pull request, so a
+# branch with an open PR is not built twice (the repository is private and
+# CI minutes are billed).
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    timeout-minutes: 40
+    runs-on: ubuntu-24.04
+    container: swift:6.4-noble
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: .conformance-data
+          key: openjpeg-data-39524bd3a601d90ed8e0177559400d23945f96a9
+      - name: Fetch conformance data
+        run: bash Scripts/fetch-conformance.sh .conformance-data
+      - name: Test
+        env:
+          JP2K_CONFORMANCE_DIR: ${{ github.workspace }}/.conformance-data
+        run: swift test
+
+  windows:
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [windows-latest, windows-11-arm]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: .conformance-data
+          key: openjpeg-data-39524bd3a601d90ed8e0177559400d23945f96a9
+      # winget is not present on windows-11-arm, so both architectures use the
+      # swift.org installer directly.
+      - name: Install Swift 6.4
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $platform = if ('${{ matrix.runner }}' -eq 'windows-11-arm') { 'windows10-arm64' } else { 'windows10' }
+          $url = "https://download.swift.org/swift-6.4.1-release/$platform/swift-6.4.1-RELEASE/swift-6.4.1-RELEASE-$platform.exe"
+          $installer = Join-Path $env:RUNNER_TEMP 'swift-installer.exe'
+          Invoke-WebRequest -Uri $url -OutFile $installer
+          $process = Start-Process -FilePath $installer -ArgumentList '/quiet', '/norestart' -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Swift installer failed with exit code $($process.ExitCode)" }
+          $machinePath = [Environment]::GetEnvironmentVariable('Path', 'Machine')
+          $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+          $env:Path = "$machinePath;$userPath;$env:Path"
+          $env:Path -split ';' | ForEach-Object { $_ | Out-File -FilePath $env:GITHUB_PATH -Append }
+          swift --version
+      - name: Fetch conformance data
+        shell: bash
+        run: bash Scripts/fetch-conformance.sh .conformance-data
+      - name: Test
+        shell: pwsh
+        env:
+          JP2K_CONFORMANCE_DIR: ${{ github.workspace }}/.conformance-data
+        run: swift test
+
+  # Swift 6.4 ships with Xcode 27; the macos-26 image defaults to Xcode 26
+  # (Swift 6.3), so both Apple jobs use the xcode-27 image.
+  macos:
+    timeout-minutes: 40
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: .conformance-data
+          key: openjpeg-data-39524bd3a601d90ed8e0177559400d23945f96a9
+      - name: Check toolchain
+        run: swift --version
+      - name: Fetch conformance data
+        run: bash Scripts/fetch-conformance.sh .conformance-data
+      - name: Test
+        env:
+          JP2K_CONFORMANCE_DIR: ${{ github.workspace }}/.conformance-data
+        run: swift test
+
+  ios:
+    timeout-minutes: 40
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: .conformance-data
+          key: openjpeg-data-39524bd3a601d90ed8e0177559400d23945f96a9
+      - name: Fetch conformance data
+        run: bash Scripts/fetch-conformance.sh .conformance-data
+      # xcodebuild forwards TEST_RUNNER_-prefixed variables (prefix stripped)
+      # into the simulator test process; simulator processes can read host
+      # paths (checked locally with Xcode 27.1).
+      - name: Test on first available iPhone simulator
+        env:
+          TEST_RUNNER_JP2K_CONFORMANCE_DIR: ${{ github.workspace }}/.conformance-data
+        run: |
+          swift --version
+          simulator=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; devices=json.load(sys.stdin)["devices"]; print(next(d["udid"] for group in devices.values() for d in group if "iPhone" in d["name"]))')
+          xcodebuild test -scheme swift-jp2k-decoder-Package -destination "platform=iOS Simulator,id=$simulator"
+
+  android:
+    timeout-minutes: 40
+    runs-on: ubuntu-24.04
+    env:
+      SWIFT_ANDROID_SDK_URL: https://download.swift.org/swift-6.4.1-release/android-sdk/swift-6.4.1-RELEASE/swift-6.4.1-RELEASE_android.artifactbundle.tar.gz
+      SWIFT_ANDROID_SDK_CHECKSUM: a356b79f8f1daa6ae3a66f4c556966ca20c0208b3659805cf30a83a0a31d6772
+      SWIFT_ANDROID_SDK_ID: swift-6.4.1-RELEASE_android
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Swift and Android NDK
+        run: |
+          curl -fsSL https://download.swift.org/swiftly/linux/swiftly-$(uname -m).tar.gz -o swiftly.tar.gz
+          tar -xzf swiftly.tar.gz
+          ./swiftly init --quiet-shell-followup --assume-yes --skip-install
+          echo "$HOME/.local/share/swiftly/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/share/swiftly/bin/swiftly" install 6.4.1
+          curl -fSL https://dl.google.com/android/repository/android-ndk-r30-Linux.zip -o ndk.zip
+          unzip -qo ndk.zip
+          echo "ANDROID_NDK_HOME=$PWD/android-ndk-r30" >> "$GITHUB_ENV"
+      - name: Install Swift Android SDK
+        run: |
+          swift sdk install "$SWIFT_ANDROID_SDK_URL" --checksum "$SWIFT_ANDROID_SDK_CHECKSUM"
+          swift sdk list
+      - name: Cross-build aarch64 tests
+        run: swift build --build-tests --swift-sdk "$SWIFT_ANDROID_SDK_ID" --triple aarch64-unknown-linux-android28
+      - name: Start x86_64 emulator
+        run: |
+          echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
+          export PATH="$ANDROID_HOME/platform-tools:$PATH"
+          echo y | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'system-images;android-35;google_apis;x86_64' 'platform-tools' 'emulator'
+          echo no | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd -n jp2k-ci -k 'system-images;android-35;google_apis;x86_64' --force
+          sudo chmod 666 /dev/kvm
+          "$ANDROID_HOME/emulator/emulator" -avd jp2k-ci -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect > emulator.log 2>&1 &
+          adb wait-for-device
+          until [[ $(adb shell getprop sys.boot_completed | tr -d '\r') == 1 ]]; do sleep 5; done
+      - name: Test x86_64
+        run: bash Scripts/android-test.sh x86_64-unknown-linux-android28
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: android-emulator-log
+          path: emulator.log
+
+  lint:
+    timeout-minutes: 40
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Lint
+        run: docker run --rm --entrypoint bash -v "$PWD:/src" -w /src ghcr.io/realm/swiftlint:0.65.1 -lc 'swiftlint lint --strict && bash Scripts/lint-selftest.sh'
+
+  api:
+    timeout-minutes: 40
+    runs-on: ubuntu-24.04
+    container: swift:6.4-noble
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check public API
+        run: bash Scripts/api-dump.sh | diff -u docs/api.txt -
