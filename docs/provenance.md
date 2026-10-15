@@ -35,3 +35,5 @@
 | Sources/JP2K/Tier1/T1Tables.swift | T1Tables.zeroCoding, T1Tables.signCoding, T1Tables.signPrediction, T1Tables.magnitudeContext | src/lib/openjp2/t1_luts.h, src/lib/openjp2/t1.c | lut_ctxno_zc, lut_ctxno_sc, lut_spb, opj_t1_getctxno_mag |
 | Sources/JP2K/Tier1/T1Tables.swift | T1Tables.states | src/lib/openjp2/mqc.c | mqc_states |
 | Tests/JP2KTests/Support/MQEncoder.swift | MQEncoder | src/lib/openjp2/mqc.c, src/lib/openjp2/mqc_inl.h | opj_mqc_init_enc, opj_mqc_encode, opj_mqc_flush, opj_mqc_byteout |
+| Sources/JP2K/Tier1/CodeBlockDecoder.swift | CodeBlockDecoder.decode, CodeBlockDecoder.init | src/lib/openjp2/t1.c | opj_t1_decode_cblk, opj_t1_allocate_buffers |
+| Sources/JP2K/Tier1/CodeBlockDecoder.swift | CodeBlockDecoder.significancePass, CodeBlockDecoder.refinementPass, CodeBlockDecoder.cleanupPass, CodeBlockDecoder.mark, CodeBlockDecoder.signIndex | src/lib/openjp2/t1.c | opj_t1_dec_sigpass_mqc, opj_t1_dec_refpass_mqc, opj_t1_dec_clnpass, opj_t1_dec_clnpass_step, opj_t1_update_flags, opj_t1_getctxtno_sc_or_spb_index |

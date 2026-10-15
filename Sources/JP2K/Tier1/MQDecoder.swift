@@ -39,6 +39,7 @@
 struct MQDecoder {
     private let data: [UInt8]
     private let segmentLengths: [Int]
+    private let segments: [CodeBlockSegment]
     private var position = 0
     private var segmentStart = 0
     private var end = 0
@@ -56,8 +57,19 @@ struct MQDecoder {
         try budget.reserve(bytes: length)
         self.data = data + [0xFF, 0xFF]
         self.segmentLengths = segmentLengths
+        self.segments = []
         let first = segmentLengths.first ?? data.count
         end = min(data.count, max(0, first))
+        initializeMQ()
+    }
+
+    /// Borrows the code-block decoder's already budgeted, padded scratch.
+    init(paddedData: [UInt8], dataCount: Int, segments: [CodeBlockSegment]) {
+        self.data = paddedData
+        self.segmentLengths = []
+        self.segments = segments
+        let first = segments.first?.length ?? dataCount
+        end = min(dataCount, max(0, first))
         initializeMQ()
     }
 
@@ -69,15 +81,18 @@ struct MQDecoder {
     }
 
     mutating func startSegment(_ index: Int, raw: Bool = false) {
-        guard segmentLengths.indices.contains(index) else { return }
+        let segmentCount = segments.isEmpty ? segmentLengths.count : segments.count
+        guard (0..<segmentCount).contains(index) else { return }
         var start = 0
-        for length in segmentLengths[..<index] {
+        for previous in 0..<index {
+            let length = segments.isEmpty ? segmentLengths[previous] : segments[previous].length
             let (sum, overflow) = start.addingReportingOverflow(max(0, length))
             start = overflow ? data.count - 2 : min(data.count - 2, sum)
         }
         position = start
         segmentStart = start
-        let (finish, overflow) = start.addingReportingOverflow(max(0, segmentLengths[index]))
+        let length = segments.isEmpty ? segmentLengths[index] : segments[index].length
+        let (finish, overflow) = start.addingReportingOverflow(max(0, length))
         end = overflow ? data.count - 2 : min(data.count - 2, finish)
         if raw { rawInitDec() } else { initializeMQ() }
     }
