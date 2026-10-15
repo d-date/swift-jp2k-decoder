@@ -16,3 +16,6 @@
 | Sources/JP2K/Codestream/ROI.swift | ROI.parse | src/lib/openjp2/j2k.c | opj_j2k_read_rgn |
 | Sources/JP2K/Codestream/Progression.swift | Progression.parse | src/lib/openjp2/j2k.c | opj_j2k_read_poc |
 | Sources/JP2K/Codestream/MainHeader.swift | MainHeaderParser.parse | src/lib/openjp2/j2k.c | opj_j2k_read_header_procedure, opj_j2k_read_ppm, opj_j2k_read_tlm, opj_j2k_read_plm, opj_j2k_read_crg, opj_j2k_read_com |
+| Sources/JP2K/Codestream/TileParts.swift | TilePartParser.parse | src/lib/openjp2/j2k.c | opj_j2k_get_sot_values, opj_j2k_read_sot, opj_j2k_read_sod, opj_j2k_read_plt |
+| Sources/JP2K/Codestream/TileParts.swift | TilePartParser.mergePPM | src/lib/openjp2/j2k.c | opj_j2k_read_ppm, opj_j2k_merge_ppm |
+| Sources/JP2K/Codestream/TileParts.swift | TilePartParser.apply | src/lib/openjp2/j2k.c | opj_j2k_read_ppt, opj_j2k_merge_ppt, opj_j2k_read_cod, opj_j2k_read_coc, opj_j2k_read_qcd, opj_j2k_read_qcc, opj_j2k_read_rgn, opj_j2k_read_poc |
