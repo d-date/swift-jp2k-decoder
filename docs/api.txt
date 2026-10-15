@@ -6,6 +6,10 @@ ColorSpace.other(_:) | case other(UInt32)
 ColorSpace.sRGB | case sRGB
 ColorSpace.sYCC | case sYCC
 ColorSpace.unspecified | case unspecified
+ComponentImage | struct ComponentImage
+ComponentImage.components | let components: [[Int32]]
+ComponentImage.iccProfile | let iccProfile: [UInt8]?
+ComponentImage.info | let info: ImageInfo
 ComponentInfo | struct ComponentInfo
 ComponentInfo.!=(_:_:) | static func != (lhs: borrowing Self, rhs: borrowing Self) -> Bool
 ComponentInfo.dx | let dx: Int
@@ -23,6 +27,8 @@ ImageInfo.height | let height: Int
 ImageInfo.isJP2Container | let isJP2Container: Bool
 ImageInfo.width | let width: Int
 JP2KDecoder | struct JP2KDecoder
+JP2KDecoder.decodeComponents(_:) | func decodeComponents(_ bytes: Span<UInt8>) throws(JP2KError) -> ComponentImage
+JP2KDecoder.decodeComponents(_:) | func decodeComponents(_ bytes: [UInt8]) throws(JP2KError) -> ComponentImage
 JP2KDecoder.init(limits:) | init(limits: Limits = Limits())
 JP2KDecoder.limits | var limits: Limits
 JP2KDecoder.readInfo(_:) | func readInfo(_ bytes: Span<UInt8>) throws(JP2KError) -> ImageInfo

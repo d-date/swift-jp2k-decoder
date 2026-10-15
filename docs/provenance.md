@@ -37,3 +37,9 @@
 | Tests/JP2KTests/Support/MQEncoder.swift | MQEncoder | src/lib/openjp2/mqc.c, src/lib/openjp2/mqc_inl.h | opj_mqc_init_enc, opj_mqc_encode, opj_mqc_flush, opj_mqc_byteout |
 | Sources/JP2K/Tier1/CodeBlockDecoder.swift | CodeBlockDecoder.decode, CodeBlockDecoder.init | src/lib/openjp2/t1.c | opj_t1_decode_cblk, opj_t1_allocate_buffers |
 | Sources/JP2K/Tier1/CodeBlockDecoder.swift | CodeBlockDecoder.significancePass, CodeBlockDecoder.refinementPass, CodeBlockDecoder.cleanupPass, CodeBlockDecoder.mark, CodeBlockDecoder.signIndex | src/lib/openjp2/t1.c | opj_t1_dec_sigpass_mqc, opj_t1_dec_refpass_mqc, opj_t1_dec_clnpass, opj_t1_dec_clnpass_step, opj_t1_update_flags, opj_t1_getctxtno_sc_or_spb_index |
+| Sources/JP2K/Transform/Dequantize.swift | Dequantize.sample | src/lib/openjp2/t1.c | opj_t1_clbl_decode_processor |
+| Sources/JP2K/Transform/InverseDWT.swift | InverseDWT.decode, inverse53, inverse97 | src/lib/openjp2/dwt.c | opj_dwt_decode, opj_idwt53_h, opj_idwt53_v, opj_dwt_decode_real, opj_v8dwt_decode |
+| Sources/JP2K/Transform/InverseMCT.swift | InverseMCT.decode | src/lib/openjp2/mct.c | opj_mct_decode, opj_mct_decode_real |
+| Sources/JP2K/Transform/InverseMCT.swift | InverseMCT.levelShift | src/lib/openjp2/tcd.c | opj_tcd_dc_level_shift_decode |
+| Sources/JP2K/Transform/TileDecoder.swift | TileDecoder.decode | src/lib/openjp2/tcd.c, src/lib/openjp2/t1.c | opj_tcd_decode_tile, opj_tcd_t1_decode, opj_tcd_dwt_decode, opj_tcd_mct_decode, opj_tcd_dc_level_shift_decode, opj_t1_clbl_decode_processor |
+| Sources/JP2K/Output/ComponentAssembler.swift | ComponentAssembler.assemble | src/lib/openjp2/j2k.c | opj_j2k_update_image_data |

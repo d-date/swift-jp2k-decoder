@@ -15,6 +15,10 @@ public struct JP2KDecoder: Sendable {
     }
 
     private func readInfoArray(_ input: [UInt8], context: inout DecodeContext) throws(JP2KError) -> ImageInfo {
+        try parseInfoArray(input, context: &context).0
+    }
+
+    private func parseInfoArray(_ input: [UInt8], context: inout DecodeContext) throws(JP2KError) -> (ImageInfo, MainHeader, JP2File?) {
         let format = try FormatDetector.detect(input)
         let file: JP2File?
         let range: Range<Int>
@@ -70,8 +74,9 @@ public struct JP2KDecoder: Sendable {
             case .other: color = .unspecified
             }
         } else { color = .unspecified }
-        return ImageInfo(width: width, height: height, components: components,
-                         colorSpace: color, isJP2Container: file != nil)
+        let info = ImageInfo(width: width, height: height, components: components,
+                             colorSpace: color, isJP2Container: file != nil)
+        return (info, header, file)
     }
 
     public func readInfo(_ bytes: [UInt8]) throws(JP2KError) -> ImageInfo {
@@ -80,4 +85,37 @@ public struct JP2KDecoder: Sendable {
         try context.budget.reserve(bytes: bytes.count)
         return try readInfoArray(bytes, context: &context)
     }
+
+    /// Decodes every codestream component at its native precision.
+    public func decodeComponents(_ bytes: Span<UInt8>) throws(JP2KError) -> ComponentImage {
+        if bytes.count < 12 || bytes.count > limits.maxInputBytes { throw .inputSize }
+        var context = DecodeContext(limits: limits)
+        try context.budget.reserve(bytes: bytes.count)
+        var input: [UInt8] = []
+        input.reserveCapacity(bytes.count)
+        for index in 0..<bytes.count { input.append(bytes[index]) }
+        return try decodeComponentsArray(input, context: &context)
+    }
+
+    /// Decodes every codestream component at its native precision.
+    public func decodeComponents(_ bytes: [UInt8]) throws(JP2KError) -> ComponentImage {
+        if bytes.count < 12 || bytes.count > limits.maxInputBytes { throw .inputSize }
+        var context = DecodeContext(limits: limits)
+        try context.budget.reserve(bytes: bytes.count)
+        return try decodeComponentsArray(bytes, context: &context)
+    }
+
+    private func decodeComponentsArray(_ input: [UInt8], context: inout DecodeContext) throws(JP2KError) -> ComponentImage {
+        let (info, header, file) = try parseInfoArray(input, context: &context)
+        let tileParts = try TilePartParser.parse(input, header: header, context: &context)
+        try context.budget.reserve(bytes: try Checked.mul(tileParts.count, MemoryLayout<TileGeometry>.stride))
+        var tiles: [TileGeometry] = []
+        tiles.reserveCapacity(tileParts.count)
+        for tile in tileParts { tiles.append(try TileDecoder.decode(tile, header: header, context: &context)) }
+        let components = try ComponentAssembler.assemble(tiles, info: info, context: &context)
+        let profile: [UInt8]?
+        if let file, case .restrictedICC(let bytes) = file.header.colour { profile = bytes } else { profile = nil }
+        return ComponentImage(info: info, components: components, iccProfile: profile)
+    }
+
 }
