@@ -31,3 +31,7 @@
 | Sources/JP2K/Tier2/PacketDecoder.swift | PacketDecoder.decodeTile | src/lib/openjp2/t2.c | opj_t2_decode_packets, opj_t2_decode_packet, opj_t2_read_packet_header, opj_t2_read_packet_data, opj_t2_init_seg |
 | Sources/JP2K/Tier2/PacketDecoder.swift | PacketDecoder.commaCode, PacketDecoder.numberOfPasses | src/lib/openjp2/t2.c | opj_t2_getcommacode, opj_t2_getnumpasses |
 | Sources/JP2K/Tier2/TileGeometry.swift | CodeBlockPacketSegment, CodeBlockSegment | src/lib/openjp2/t2.c | opj_t2_read_packet_header, opj_t2_read_packet_data |
+| Sources/JP2K/Tier1/MQDecoder.swift | MQDecoder | src/lib/openjp2/mqc.c, src/lib/openjp2/mqc_inl.h | opj_mqc_init_dec, opj_mqc_raw_init_dec, opj_mqc_resetstates, opj_mqc_setstate, opj_mqc_bytein, opj_mqc_decode, opj_mqc_raw_decode |
+| Sources/JP2K/Tier1/T1Tables.swift | T1Tables.zeroCoding, T1Tables.signCoding, T1Tables.signPrediction, T1Tables.magnitudeContext | src/lib/openjp2/t1_luts.h, src/lib/openjp2/t1.c | lut_ctxno_zc, lut_ctxno_sc, lut_spb, opj_t1_getctxno_mag |
+| Sources/JP2K/Tier1/T1Tables.swift | T1Tables.states | src/lib/openjp2/mqc.c | mqc_states |
+| Tests/JP2KTests/Support/MQEncoder.swift | MQEncoder | src/lib/openjp2/mqc.c, src/lib/openjp2/mqc_inl.h | opj_mqc_init_enc, opj_mqc_encode, opj_mqc_flush, opj_mqc_byteout |
