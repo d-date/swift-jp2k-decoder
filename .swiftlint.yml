@@ -1,0 +1,32 @@
+included: [Sources/JP2K]
+
+opt_in_rules:
+  - force_unwrapping
+
+disabled_rules:
+  - identifier_name
+  - line_length
+  - function_body_length
+  - type_body_length
+  - file_length
+  - cyclomatic_complexity
+  - function_parameter_count
+  - large_tuple
+  - nesting
+
+custom_rules:
+  no_fatal_error:
+    name: No fatal error
+    regex: '\bfatalError\s*\('
+    excluded_match_kinds: [comment, comment.mark, comment.url, doccomment, doccomment.field, string]
+    severity: error
+  no_precondition:
+    name: No precondition or assertion
+    regex: '\b(precondition|preconditionFailure|assert|assertionFailure)\s*\('
+    excluded_match_kinds: [comment, comment.mark, comment.url, doccomment, doccomment.field, string]
+    severity: error
+  no_unsafe:
+    name: No unsafe APIs
+    regex: '\b(unsafe\w*|withUnsafe\w*|Unsafe\w*)\b'
+    excluded_match_kinds: [comment, comment.mark, comment.url, doccomment, doccomment.field, string]
+    severity: error

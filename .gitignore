@@ -1,0 +1,5 @@
+.build/
+.swiftpm/
+.reference/
+.DS_Store
+Fuzz/artifacts/

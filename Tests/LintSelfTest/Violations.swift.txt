@@ -1,0 +1,17 @@
+func throwing() throws {}
+nonisolated(unsafe) var shared = 0
+
+func violations(_ value: Any, _ bytes: [UInt8]) {
+    let optional: Int? = 1
+    _ = optional!
+    try! throwing()
+    _ = value as! Int
+    fatalError()
+    precondition(false)
+    preconditionFailure()
+    assert(false)
+    assertionFailure()
+    _ = UnsafeRawPointer.self
+    bytes.withUnsafeBytes { _ in }
+    _ = unsafe bytes.count
+}

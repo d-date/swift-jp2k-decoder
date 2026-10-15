@@ -1,0 +1,2 @@
+JP2KDecoder | struct JP2KDecoder
+JP2KDecoder.init() | init()
