@@ -12,8 +12,12 @@ enum Fixtures {
             return URL(fileURLWithPath: directory, isDirectory: true)
                 .appendingPathComponent(name)
         }
+        #if os(Android)
+        return nil
+        #else
         return Bundle.module.resourceURL?
             .appendingPathComponent("Fixtures", isDirectory: true)
             .appendingPathComponent(name)
+        #endif
     }
 }

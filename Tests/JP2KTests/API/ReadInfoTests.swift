@@ -93,16 +93,20 @@ private func jp2(_ stream: [UInt8], width: Int = 8, height: Int = 8,
         #expect(info.width > 0 && info.height > 0)
         let stem = url.deletingPathExtension().lastPathComponent
         if let expectedURL = Fixtures.url(stem + "_0.pgx"),
-           let data = try? Data(contentsOf: expectedURL),
-           let newline = data.firstIndex(of: 10),
-           let line = String(data: data.prefix(upTo: newline), encoding: .ascii) {
-            let words = line.split(separator: " ")
-            if words.count >= 5, let width = Int(words[3]), let height = Int(words[4]) {
-                #expect(info.components[0].width == width)
-                #expect(info.components[0].height == height)
-            }
+           let data = try? Data(contentsOf: expectedURL) {
+            let reference = try PGX.parse(Array(data))
+            #expect(info.components[0].width == reference.width)
+            #expect(info.components[0].height == reference.height)
         }
     }
+}
+
+@Test func signedTwelveBitFixtureReportsSignedPrecision() throws {
+    let url = try #require(Fixtures.url("signed12-31x19.j2k"))
+    let info = try JP2KDecoder().readInfo(Array(Data(contentsOf: url)))
+    #expect(info.components.count == 1)
+    #expect(info.components[0].precision == 12)
+    #expect(info.components[0].isSigned)
 }
 
 @Test(arguments: [
