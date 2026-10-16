@@ -188,7 +188,12 @@ jobs:
             echo y | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "$AVD_IMAGE"
           fi
           echo y | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platform-tools' 'emulator' > /dev/null
+          # avdmanager and the emulator default to different AVD directories on
+          # the runner; pin one for both.
+          export ANDROID_AVD_HOME="$HOME/.android/avd"
+          mkdir -p "$ANDROID_AVD_HOME"
           echo no | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd -n jp2k-ci -k "$AVD_IMAGE" --force
+          "$ANDROID_HOME/emulator/emulator" -list-avds
           # Hardware acceleration: without KVM access the x86_64 emulator never
           # finishes booting on the hosted runner.
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules > /dev/null
