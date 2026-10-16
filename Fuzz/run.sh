@@ -25,13 +25,18 @@ if [[ -n "${JP2K_CONFORMANCE_DIR:-}" && -d "$JP2K_CONFORMANCE_DIR/input/conforma
         -exec cp -n {} "$corpus/" \;
 fi
 
-jobs=$(nproc 2>/dev/null || echo 2)
+# -timeout is 60 s because valid large seeds take 15+ s under ASan and a busy
+# machine causes false timeouts; release-mode hang detection is the corrupt
+# corpus sweep (2 s per case, Tests/JP2KTests/Corrupt).
+# JOBS overrides the job count, e.g. to leave CPUs free on a shared machine;
+# an overloaded machine produces false timeouts.
+jobs=${JOBS:-$(nproc 2>/dev/null || echo 2)}
 start=$(date +%s)
 log="$repo_root/Fuzz/fuzz.log"
 set +e
 "$binary" "$corpus" \
     -fork="$jobs" -ignore_crashes=0 -ignore_ooms=0 -ignore_timeouts=0 \
-    -rss_limit_mb=2048 -timeout=30 -max_len=262144 -max_total_time="$seconds" \
+    -rss_limit_mb=2048 -timeout=60 -max_len=262144 -max_total_time="$seconds" \
     -artifact_prefix="$artifacts/" -print_final_stats=1 2>&1 | tee "$log"
 set -e
 end=$(date +%s)

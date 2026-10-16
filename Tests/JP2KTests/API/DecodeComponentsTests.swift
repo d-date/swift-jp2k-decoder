@@ -10,6 +10,9 @@ struct DecodeComponentsTests {
         ("rgb-64-53-mct.jp2", 3, 0),
         ("rgb-64-97.jp2", 3, 1),
         ("gray16-40x30.jp2", 1, 0),
+        ("cblk-8x8.j2k", 1, 0),
+        ("rgba-33x17.jp2", 4, 0),
+        ("signed12-31x19.j2k", 1, 0),
         ("levels-0.j2k", 1, 0),
         ("levels-max.j2k", 1, 0)
     ])
@@ -24,22 +27,6 @@ struct DecodeComponentsTests {
             #expect(image.components[index].count == pgx.samples.count)
             let difference = zip(image.components[index], pgx.samples).map { abs(Int($0) - Int($1)) }.max() ?? 0
             #expect(difference <= tolerance)
-        }
-    }
-
-    @Test(arguments: [
-        "cblk-8x8.j2k", "layers.j2k", "origin.j2k", "poc.j2k", "precincts.j2k",
-        "prog-cprl.j2k", "prog-lrcp.j2k", "prog-pcrl.j2k", "prog-rlcp.j2k", "prog-rpcl.j2k",
-        "rgba-33x17.jp2", "roi.j2k", "signed12-31x19.j2k", "sop-eph.j2k",
-        "subsampled-rgb.j2k", "subsampled.j2k", "tileparts.j2k", "tiles-127x61.j2k"
-    ])
-    func componentLengths(name: String) throws {
-        let url = try #require(Fixtures.url(name))
-        let image = try JP2KDecoder().decodeComponents(Array(Data(contentsOf: url)))
-        #expect(image.components.count == image.info.components.count)
-        for index in image.components.indices {
-            let descriptor = image.info.components[index]
-            #expect(image.components[index].count == descriptor.width * descriptor.height)
         }
     }
 

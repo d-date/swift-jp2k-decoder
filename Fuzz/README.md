@@ -16,7 +16,9 @@ docker run --rm -v "$PWD":/w -w /w swift:6.4-noble bash -c \
 `run.sh <seconds>` seeds `Fuzz/corpus` from the fixtures (plus the
 conformance inputs when `JP2K_CONFORMANCE_DIR` points at an openjpeg-data
 checkout, e.g. `-v "$PWD/.reference/openjpeg-data":/cdata -e JP2K_CONFORMANCE_DIR=/cdata`)
-and runs one fuzzing job per CPU. Findings are written to `Fuzz/artifacts/`.
+and runs one fuzzing job per CPU (`JOBS=<n>` overrides this; leave CPUs free
+when the machine is busy, because an overloaded machine produces false
+timeouts). Findings are written to `Fuzz/artifacts/`.
 
 The fork-mode parent reports a small leak inside libFuzzer's own driver when it
 exits, so `run.sh` judges a run by libFuzzer's completion line and by the

@@ -44,15 +44,6 @@ private func decodePacketFixture(_ name: String, limits: Limits = Limits()) thro
     #expect(try PacketDecoder.commaCode(&comma) == 3)
 }
 
-@Test(arguments: ["gray-378x472-53.j2k", "sop-eph.j2k", "layers.j2k", "modes-termall.j2k", "modes-bypass.j2k", "precincts.j2k"])
-func packetFixtureDecodes(_ name: String) throws {
-    let (_, geometry) = try decodePacketFixture(name)
-    let blocks = geometry.components.flatMap { $0.resolutions.flatMap { $0.bands.flatMap { $0.precincts.flatMap(\.codeBlocks) } } }
-    #expect(blocks.contains { $0.totalPasses > 0 })
-    #expect(blocks.allSatisfy { $0.totalPasses <= 109 })
-    #expect(blocks.allSatisfy { $0.segments.reduce(0) { $0 + $1.length } == $0.data.count })
-}
-
 @Test func packetPassLimit() throws {
     var limits = Limits()
     limits.maxCodingPasses = 0
@@ -187,6 +178,10 @@ private func packetTrace(_ geometry: TileGeometry) -> [String] {
 @Test(arguments: ["gray-378x472-53", "sop-eph", "layers", "modes-termall", "modes-bypass", "precincts"])
 func packetSegmentsMatchOpenJPEG(_ name: String) throws {
     let (_, geometry) = try decodePacketFixture("\(name).j2k")
+    let blocks = geometry.components.flatMap { $0.resolutions.flatMap { $0.bands.flatMap { $0.precincts.flatMap(\.codeBlocks) } } }
+    #expect(blocks.contains { $0.totalPasses > 0 })
+    #expect(blocks.allSatisfy { $0.totalPasses <= 109 })
+    #expect(blocks.allSatisfy { $0.segments.reduce(0) { $0 + $1.length } == $0.data.count })
     let url = try #require(Fixtures.url("packet-segments-\(name).txt"))
     let lines = try String(contentsOf: url, encoding: .utf8).split(separator: "\n")
     let actual = packetTrace(geometry)

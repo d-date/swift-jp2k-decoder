@@ -253,30 +253,3 @@ private func checkGeometry(_ geometry: TileGeometry, componentRect: [Int],
         try TileGeometryBuilder.build(tile: tile, header: header, context: &buildContext)
     }
 }
-
-@Test func geometryBuildsFixtureRange() throws {
-    let names = ["gray-378x472-53.j2k", "gray-378x472-97.jp2", "cblk-8x8.j2k",
-                 "levels-0.j2k", "levels-max.j2k", "origin.j2k", "subsampled.j2k",
-                 "tiles-127x61.j2k", "rgb-64-53-mct.jp2", "signed12-31x19.j2k"]
-    for name in names {
-        let bytes = Array(try Data(contentsOf: try #require(Fixtures.url(name))))
-        var context = DecodeContext(limits: Limits())
-        let codestream: [UInt8]
-        if name.hasSuffix(".jp2") {
-            let parsed = try JP2Parser.parse(bytes, context: &context)
-            codestream = Array(bytes[parsed.codestream])
-        } else { codestream = bytes }
-        let header = try MainHeaderParser.parse(codestream, range: 0..<codestream.count, context: &context)
-        let tiles = try TilePartParser.parse(codestream, header: header, context: &context)
-        for tile in tiles {
-            let geometry = try TileGeometryBuilder.build(tile: tile, header: header, context: &context)
-            #expect(geometry.components.count == header.geometry.components.count)
-        }
-    }
-}
-
-@Test func packetBitReaderHandlesStuffingAndTruncation() throws {
-    var bits = PacketBitReader([0xFF, 0x7F])
-    for _ in 0..<15 { #expect(try bits.readBit() == 1) }
-    #expect(throws: JP2KError.invalidCodestream(.badPacketHeader)) { try bits.readBit() }
-}

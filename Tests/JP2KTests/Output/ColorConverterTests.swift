@@ -236,18 +236,12 @@ struct ColorConverterTests {
                 #expect(adjusted[green] == 134)
                 adjusted[green] = 135
                 #expect(SHA256.hex(adjusted) == "c361925aaa5196ddb9fe7d5064edc9604acc0555a61a7c42d9667383838ed07a")
-                #expect(Array(image.pixels.prefix(30)) == [158, 168, 186, 155, 169, 184, 154, 169, 181,
-                    155, 168, 183, 159, 167, 186, 160, 169, 183, 159, 167, 184, 157, 170, 185,
-                    161, 171, 185, 163, 173, 189])
             }
             if name == "file9.jp2" {
                 #expect(SHA256.hex(image.pixels) == "c189c30a239bc892b01981825c8d9e0568eede7ab26e128e46315acabc1bf1e0")
             }
             if name == "file3.jp2" {
                 #expect(SHA256.hex(image.pixels) == "f11b275bc77b00ecdeaf466ebb1a167c379c68e3969721fd64202f911ad2788a")
-                #expect(Array(image.pixels.prefix(30)) == [158, 168, 186, 158, 168, 186, 154, 169, 181,
-                    154, 169, 181, 159, 167, 186, 160, 168, 187, 159, 167, 184, 160, 168, 185,
-                    161, 171, 185, 163, 173, 187])
             }
         }
     }

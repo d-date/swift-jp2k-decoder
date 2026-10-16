@@ -23,7 +23,8 @@ struct MultiTileTests {
 
     @Test(arguments: [
         "tiles-127x61.j2k", "tileparts.j2k", "two-tiles-127x61.j2k", "poc.j2k", "precincts.j2k", "layers.j2k",
-        "roi.j2k", "subsampled.j2k", "subsampled-rgb.j2k", "sop-eph.j2k", "origin.j2k",
+        "roi.j2k", "subsampled.j2k", "subsampled-4x.j2k", "subsampled-rgb.j2k", "sop-eph.j2k", "origin.j2k",
+        "empty-leading-tile.j2k",
         "prog-lrcp.j2k", "prog-rlcp.j2k", "prog-rpcl.j2k", "prog-pcrl.j2k", "prog-cprl.j2k",
         "modes-bypass.j2k", "modes-reset.j2k", "modes-termall.j2k", "modes-vcausal.j2k",
         "modes-pterm.j2k", "modes-segsym.j2k", "modes-all.j2k"
@@ -32,10 +33,21 @@ struct MultiTileTests {
         let input = Array(try Data(contentsOf: #require(Fixtures.url(name))))
         let image = try JP2KDecoder().decodeComponents(input)
         let stem = String(name.split(separator: ".").first ?? "")
+        // Expected component count comes from the OpenJPEG reference files
+        // (<stem>_0.pgx, <stem>_1.pgx, ...), not from the decoder's own output.
+        var referenceCount = 0
+        while let url = Fixtures.url("\(stem)_\(referenceCount).pgx"),
+              FileManager.default.fileExists(atPath: url.path) {
+            referenceCount += 1
+        }
+        #expect(referenceCount > 0)
+        #expect(image.components.count == referenceCount)
+        #expect(image.info.components.count == referenceCount)
         for index in image.components.indices {
             let reference = try PGX.parse(Array(Data(contentsOf: #require(Fixtures.url("\(stem)_\(index).pgx")))))
             #expect(image.info.components[index].width == reference.width)
             #expect(image.info.components[index].height == reference.height)
+            #expect(image.components[index].count == image.info.components[index].width * image.info.components[index].height)
             #expect(image.components[index] == reference.samples)
         }
     }

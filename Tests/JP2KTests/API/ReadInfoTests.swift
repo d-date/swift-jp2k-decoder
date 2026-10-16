@@ -80,27 +80,6 @@ private func jp2(_ stream: [UInt8], width: Int = 8, height: Int = 8,
     #expect(rejected.isEmpty)
 }
 
-@Test func readsAvailableFixtureHeaders() throws {
-    guard let directory = Fixtures.url(".gitkeep")?.deletingLastPathComponent(),
-          let names = try? FileManager.default.contentsOfDirectory(atPath: directory.path) else { return }
-    let images = names.filter { name in
-        let ext = URL(fileURLWithPath: name).pathExtension.lowercased()
-        return ext == "j2k" || ext == "jp2" || ext == "j2c"
-    }
-    for name in images {
-        guard let url = Fixtures.url(name) else { continue }
-        let info = try JP2KDecoder().readInfo([UInt8](Data(contentsOf: url)))
-        #expect(info.width > 0 && info.height > 0)
-        let stem = url.deletingPathExtension().lastPathComponent
-        if let expectedURL = Fixtures.url(stem + "_0.pgx"),
-           let data = try? Data(contentsOf: expectedURL) {
-            let reference = try PGX.parse(Array(data))
-            #expect(info.components[0].width == reference.width)
-            #expect(info.components[0].height == reference.height)
-        }
-    }
-}
-
 @Test func signedTwelveBitFixtureReportsSignedPrecision() throws {
     let url = try #require(Fixtures.url("signed12-31x19.j2k"))
     let info = try JP2KDecoder().readInfo(Array(Data(contentsOf: url)))

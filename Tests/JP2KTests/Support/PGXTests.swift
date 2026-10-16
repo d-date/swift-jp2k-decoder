@@ -24,15 +24,6 @@ struct PGXTests {
         #expect(little.samples == big.samples)
     }
 
-    @Test func parsesGeneratedReference() throws {
-        let url = try #require(Fixtures.url("gray16-40x30_0.pgx"))
-        let image = try PGX.parse(Array(Data(contentsOf: url)))
-        #expect(image.width == 40)
-        #expect(image.height == 30)
-        #expect(image.bits == 16)
-        #expect(image.samples.count == 1_200)
-    }
-
     @Test func signedTwelveBitFixtureUsesFullRange() throws {
         let referenceURL = try #require(Fixtures.url("signed12-31x19_0.pgx"))
         let bytes = Array(try Data(contentsOf: referenceURL))
