@@ -91,11 +91,28 @@ enum ColorConverter {
         // interleaved pixel buffer is allocated and charged to the budget.
         let count = try Checked.mul(try Checked.mul(crop.2, crop.3), channelCount)
         var pixels = try context.budget.array(repeating: UInt8(0), count: count)
+        // At most four output channels exist. Keep their scale factors on the
+        // stack so conversion does not add a budgeted allocation.
+        let neutral = ChannelScale(precision: 8, signed: false)
+        let scales: (ChannelScale, ChannelScale, ChannelScale, ChannelScale)
+        if sycc {
+            scales = (neutral, neutral, neutral, neutral)
+        } else {
+            let first = try channelScale(order[0], image: image, mapping: mapping, palette: palette)
+            let second = channelCount > 1
+                ? try channelScale(order[1], image: image, mapping: mapping, palette: palette) : neutral
+            let third = channelCount > 2
+                ? try channelScale(order[2], image: image, mapping: mapping, palette: palette) : neutral
+            let fourth = channelCount > 3
+                ? try channelScale(order[3], image: image, mapping: mapping, palette: palette) : neutral
+            scales = (first, second, third, fourth)
+        }
         for row in 0..<crop.3 {
+            let y = try Checked.add(crop.1, row)
+            let rowBase = try Checked.mul(Checked.mul(row, crop.2), channelCount)
             for column in 0..<crop.2 {
                 let x = try Checked.add(crop.0, column)
-                let y = try Checked.add(crop.1, row)
-                let base = try Checked.mul(try Checked.add(try Checked.mul(row, crop.2), column), channelCount)
+                let base = try Checked.add(rowBase, Checked.mul(column, channelCount))
                 if sycc {
                     let yValue = try channelValue(order[0], atX: x, y: y, image: image, mapping: mapping, palette: palette,
                                                   referenceOrigin: referenceOrigin)
@@ -118,13 +135,50 @@ enum ColorConverter {
                         let value = try channelValue(order[channel], atX: x, y: y, image: image,
                                                      mapping: mapping, palette: palette,
                                                      referenceOrigin: referenceOrigin)
-                        pixels[base + channel] = scale(value.0, precision: value.1, signed: value.2)
+                        let scaled: UInt8
+                        switch channel {
+                        case 0: scaled = scales.0.apply(value.0)
+                        case 1: scaled = scales.1.apply(value.0)
+                        case 2: scaled = scales.2.apply(value.0)
+                        default: scaled = scales.3.apply(value.0)
+                        }
+                        pixels[base + channel] = scaled
                     }
                 }
             }
         }
         return PixelImage(width: crop.2, height: crop.3, format: format, pixels: pixels,
                           colorWasInferred: inferred, maxMemoryBytes: context.limits.maxMemoryBytes)
+    }
+
+    private struct ChannelScale {
+        let maximum: Int
+        let offset: Int
+
+        init(precision: Int, signed: Bool) {
+            maximum = (1...16).contains(precision) ? (1 << precision) - 1 : 0
+            offset = signed && (1...16).contains(precision) ? 1 << (precision - 1) : 0
+        }
+
+        @inline(__always) func apply(_ value: Int) -> UInt8 {
+            if maximum == 0 { return 0 }
+            let clipped = min(max(value + offset, 0), maximum)
+            return UInt8((clipped * 255 + maximum / 2) / maximum)
+        }
+    }
+
+    private static func channelScale(_ channel: Int, image: ComponentImage,
+                                     mapping: [ComponentMapping]?, palette: PaletteBox?)
+        throws(JP2KError) -> ChannelScale {
+        let source = try sourceComponent(channel, mapping: mapping)
+        guard image.info.components.indices.contains(source) else {
+            throw .invalidContainer(.badComponentMapping)
+        }
+        if let mapping, let palette, channel < mapping.count {
+            return ChannelScale(precision: palette.bitDepths[channel], signed: palette.signed[channel])
+        }
+        let descriptor = image.info.components[source]
+        return ChannelScale(precision: descriptor.precision, signed: descriptor.isSigned)
     }
 
     private static func checkMapping(_ mapping: [ComponentMapping], palette: PaletteBox,

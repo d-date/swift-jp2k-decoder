@@ -110,13 +110,7 @@ public struct JP2KDecoder: Sendable {
     }
 
     private func decodeComponentsArray(_ input: [UInt8], context: inout DecodeContext) throws(JP2KError) -> ComponentImage {
-        let (info, header, file) = try parseInfoArray(input, context: &context)
-        let tileParts = try TilePartParser.parse(input, header: header, context: &context)
-        try context.budget.reserve(bytes: try Checked.mul(tileParts.count, MemoryLayout<TileGeometry>.stride))
-        var tiles: [TileGeometry] = []
-        tiles.reserveCapacity(tileParts.count)
-        for tile in tileParts { tiles.append(try TileDecoder.decode(tile, header: header, context: &context)) }
-        let components = try ComponentAssembler.assemble(tiles, info: info, context: &context)
+        let (info, _, file, components) = try decodeTileComponents(input, context: &context)
         let profile: [UInt8]?
         if let file, case .restrictedICC(let bytes) = file.header.colour { profile = bytes } else { profile = nil }
         return ComponentImage(info: info, components: components, iccProfile: profile)
@@ -158,6 +152,14 @@ public struct JP2KDecoder: Sendable {
 
     private func decodePixelsArray(_ input: [UInt8], color: ColorInterpretation, region: Region?,
                                    context: inout DecodeContext) throws(JP2KError) -> PixelImage {
+        let (info, header, file, components) = try decodeTileComponents(input, context: &context)
+        let image = ComponentImage(info: info, components: components, iccProfile: nil)
+        return try ColorConverter.convert(image, header: file?.header, color: color, region: region,
+                                          referenceOrigin: (header.geometry.x0, header.geometry.y0), context: &context)
+    }
+
+    private func decodeTileComponents(_ input: [UInt8], context: inout DecodeContext)
+        throws(JP2KError) -> (ImageInfo, MainHeader, JP2File?, [[Int32]]) {
         let (info, header, file) = try parseInfoArray(input, context: &context)
         let tileParts = try TilePartParser.parse(input, header: header, context: &context)
         try context.budget.reserve(bytes: try Checked.mul(tileParts.count, MemoryLayout<TileGeometry>.stride))
@@ -165,9 +167,7 @@ public struct JP2KDecoder: Sendable {
         tiles.reserveCapacity(tileParts.count)
         for tile in tileParts { tiles.append(try TileDecoder.decode(tile, header: header, context: &context)) }
         let components = try ComponentAssembler.assemble(tiles, info: info, context: &context)
-        let image = ComponentImage(info: info, components: components, iccProfile: nil)
-        return try ColorConverter.convert(image, header: file?.header, color: color, region: region,
-                                          referenceOrigin: (header.geometry.x0, header.geometry.y0), context: &context)
+        return (info, header, file, components)
     }
 
 }

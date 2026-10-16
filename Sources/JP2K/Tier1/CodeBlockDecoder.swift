@@ -116,6 +116,8 @@ struct CodeBlockDecoder: ~Copyable {
         }
         var working: [Int32] = []
         swap(&working, &data)
+        var workingFlags: [UInt32] = []
+        swap(&workingFlags, &flags)
         var mq = MQDecoder(paddedData: mqInput, dataCount: block.data.count, segments: block.segments)
         mq.resetStates()
         mq.setState(context: 18, msb: 0, prob: 46)
@@ -134,15 +136,16 @@ struct CodeBlockDecoder: ~Copyable {
             for _ in 0..<segment.passes where plane >= 1 {
                 switch passType {
                 case 0:
-                    significancePass(width: width, height: height, stride: stride, plane: plane,
+                    Self.significancePass(width: width, height: height, stride: stride, plane: plane,
                                      orientation: orientation, raw: raw, vcausal: vcausal,
-                                     mq: &mq, samples: &working)
+                                     mq: &mq, samples: &working, flags: &workingFlags)
                 case 1:
-                    refinementPass(width: width, height: height, stride: stride, plane: plane,
-                                   raw: raw, mq: &mq, samples: &working)
+                    Self.refinementPass(width: width, height: height, stride: stride, plane: plane,
+                                        raw: raw, mq: &mq, samples: &working, flags: &workingFlags)
                 default:
-                    cleanupPass(width: width, height: height, stride: stride, plane: plane,
-                                orientation: orientation, vcausal: vcausal, mq: &mq, samples: &working)
+                    Self.cleanupPass(width: width, height: height, stride: stride, plane: plane,
+                                     orientation: orientation, vcausal: vcausal, mq: &mq,
+                                     samples: &working, flags: &workingFlags)
                     if segsym {
                         // OpenJPEG consumes all four symbols and only warns on a mismatch.
                         for _ in 0..<4 { _ = mq.decode(context: 18) }
@@ -159,6 +162,7 @@ struct CodeBlockDecoder: ~Copyable {
             }
         }
         swap(&working, &data)
+        swap(&workingFlags, &flags)
         decodedCount = count
     }
 
@@ -171,7 +175,8 @@ struct CodeBlockDecoder: ~Copyable {
         index >= 0 && index < outputCount ? data[index] : 0
     }
 
-    private func signIndex(_ word: UInt32, _ west: UInt32, _ east: UInt32, _ row: Int) -> Int {
+    @inline(__always) private static func signIndex(_ word: UInt32, _ west: UInt32, _ east: UInt32,
+                                                    _ row: Int) -> Int {
         let shift = row * 3
         var index = Int((word >> shift) & 0xAA)
         index |= Int((west >> (19 + shift)) & 1)
@@ -181,7 +186,8 @@ struct CodeBlockDecoder: ~Copyable {
         return index
     }
 
-    private mutating func mark(_ index: Int, row: Int, negative: Int, stride: Int, vcausal: Bool = false) {
+    @inline(__always) private static func mark(_ index: Int, row: Int, negative: Int, stride: Int,
+                                               vcausal: Bool = false, flags: inout [UInt32]) {
         let shift = row * 3
         flags[index - 1] |= UInt32(1 << (5 + shift))
         flags[index] |= UInt32((1 << 4) | (negative << 19)) << shift
@@ -200,9 +206,10 @@ struct CodeBlockDecoder: ~Copyable {
         }
     }
 
-    private mutating func significancePass(width: Int, height: Int, stride: Int, plane: Int,
-                                           orientation: Int, raw: Bool = false, vcausal: Bool = false,
-                                           mq: inout MQDecoder, samples: inout [Int32]) {
+    private static func significancePass(width: Int, height: Int, stride: Int, plane: Int,
+                                         orientation: Int, raw: Bool = false, vcausal: Bool = false,
+                                         mq: inout MQDecoder, samples: inout [Int32],
+                                         flags: inout [UInt32]) {
         let magnitude = Int32((1 << plane) | (1 << (plane - 1)))
         for stripe in 0..<(height + 3) / 4 {
             let rows = min(4, height - stripe * 4)
@@ -220,7 +227,7 @@ struct CodeBlockDecoder: ~Copyable {
                             mq.decode(context: T1Tables.signContext(sign)) ^ T1Tables.predictedSign(sign)
                         samples[(stripe * 4 + row) * width + x] = negative != 0 ? -magnitude : magnitude
                         mark(flagIndex, row: row, negative: negative, stride: stride,
-                             vcausal: vcausal && row == 0)
+                             vcausal: vcausal && row == 0, flags: &flags)
                     }
                     flags[flagIndex] |= Self.pi << shift
                 }
@@ -228,8 +235,9 @@ struct CodeBlockDecoder: ~Copyable {
         }
     }
 
-    private mutating func refinementPass(width: Int, height: Int, stride: Int, plane: Int,
-                                         raw: Bool = false, mq: inout MQDecoder, samples: inout [Int32]) {
+    private static func refinementPass(width: Int, height: Int, stride: Int, plane: Int,
+                                       raw: Bool = false, mq: inout MQDecoder, samples: inout [Int32],
+                                       flags: inout [UInt32]) {
         let half = Int32(1 << (plane - 1))
         for stripe in 0..<(height + 3) / 4 {
             let rows = min(4, height - stripe * 4)
@@ -249,9 +257,10 @@ struct CodeBlockDecoder: ~Copyable {
         }
     }
 
-    private mutating func cleanupPass(width: Int, height: Int, stride: Int, plane: Int,
-                                      orientation: Int, vcausal: Bool = false,
-                                      mq: inout MQDecoder, samples: inout [Int32]) {
+    private static func cleanupPass(width: Int, height: Int, stride: Int, plane: Int,
+                                    orientation: Int, vcausal: Bool = false,
+                                    mq: inout MQDecoder, samples: inout [Int32],
+                                    flags: inout [UInt32]) {
         let magnitude = Int32((1 << plane) | (1 << (plane - 1)))
         for stripe in 0..<(height + 3) / 4 {
             let rows = min(4, height - stripe * 4)
@@ -278,7 +287,7 @@ struct CodeBlockDecoder: ~Copyable {
                             let negative = mq.decode(context: T1Tables.signContext(sign)) ^ T1Tables.predictedSign(sign)
                             samples[(stripe * 4 + row) * width + x] = negative != 0 ? -magnitude : magnitude
                             mark(flagIndex, row: row, negative: negative, stride: stride,
-                                 vcausal: vcausal && row == 0)
+                                 vcausal: vcausal && row == 0, flags: &flags)
                         }
                     }
                     partial = false

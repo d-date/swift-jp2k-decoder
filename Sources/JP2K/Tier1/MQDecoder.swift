@@ -42,6 +42,7 @@ struct MQDecoder {
     private let segments: [CodeBlockSegment]
     private var position = 0
     private var segmentStart = 0
+    private var currentSegmentIndex = -1
     private var end = 0
     private var a: UInt32 = 0x8000
     private var c: UInt32 = 0
@@ -85,12 +86,18 @@ struct MQDecoder {
     mutating func startSegment(_ index: Int, raw: Bool = false) {
         let segmentCount = segments.isEmpty ? segmentLengths.count : segments.count
         guard (0..<segmentCount).contains(index) else { return }
-        var start = 0
-        for previous in 0..<index {
-            let length = segments.isEmpty ? segmentLengths[previous] : segments[previous].length
-            let (sum, overflow) = start.addingReportingOverflow(max(0, length))
-            start = overflow ? data.count - 2 : min(data.count - 2, sum)
+        // Segments are visited in order by the code-block decoder. Reuse the
+        // previous end; only a caller seeking backwards needs a prefix scan.
+        let sequential = index > 0 && index == currentSegmentIndex + 1
+        var start = sequential ? end : 0
+        if !sequential {
+            for previous in 0..<index {
+                let length = segments.isEmpty ? segmentLengths[previous] : segments[previous].length
+                let (sum, overflow) = start.addingReportingOverflow(max(0, length))
+                start = overflow ? data.count - 2 : min(data.count - 2, sum)
+            }
         }
+        currentSegmentIndex = index
         position = start
         segmentStart = start
         let length = segments.isEmpty ? segmentLengths[index] : segments[index].length
@@ -105,7 +112,7 @@ struct MQDecoder {
         ct = 0
     }
 
-    mutating func rawDecode() -> Int {
+    @inline(__always) mutating func rawDecode() -> Int {
         if ct == 0 {
             if c == 0xFF {
                 if byte(at: position) > 0x8F {
@@ -128,20 +135,21 @@ struct MQDecoder {
 
     /// `context` comes from the T1 context tables, whose values are all in
     /// 0..<19 (pinned by a test); the guard only keeps a caller bug from trapping.
-    mutating func decode(context: Int) -> Int {
+    @inline(__always) mutating func decode(context: Int) -> Int {
         guard states.indices.contains(context) else { return 0 }
         let state = T1Tables.states[states[context]]
         a -= state.qeval
         let decision: Int
+        var nextState: Int?
         if c >> 16 < state.qeval {
             if a < state.qeval {
                 a = state.qeval
                 decision = state.mps
-                states[context] = state.nmps
+                nextState = state.nmps
             } else {
                 a = state.qeval
                 decision = 1 - state.mps
-                states[context] = state.nlps
+                nextState = state.nlps
             }
             renormalize()
         } else {
@@ -149,26 +157,27 @@ struct MQDecoder {
             if a & 0x8000 == 0 {
                 if a < state.qeval {
                     decision = 1 - state.mps
-                    states[context] = state.nlps
+                    nextState = state.nlps
                 } else {
                     decision = state.mps
-                    states[context] = state.nmps
+                    nextState = state.nmps
                 }
                 renormalize()
             } else {
                 decision = state.mps
             }
         }
+        if let nextState { states[context] = nextState }
         return decision
     }
 
-    private func byte(at index: Int) -> UInt8 {
+    @inline(__always) private func byte(at index: Int) -> UInt8 {
         if index >= end { return 0xFF }
         if data.indices.contains(index) { return data[index] }
         return 0xFF
     }
 
-    private mutating func byteIn() {
+    @inline(__always) private mutating func byteIn() {
         let next = UInt32(byte(at: position + 1))
         if byte(at: position) == 0xFF {
             if next > 0x8F {
@@ -196,7 +205,7 @@ struct MQDecoder {
         a = 0x8000
     }
 
-    private mutating func renormalize() {
+    @inline(__always) private mutating func renormalize() {
         repeat {
             if ct == 0 { byteIn() }
             a <<= 1

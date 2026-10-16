@@ -95,6 +95,18 @@ import Testing
                      0, 1, 0, 1, 0, 1, 0, 1])
 }
 
+@Test func mqCanRevisitSegmentsAfterSequentialDecode() {
+    var decoder = MQDecoder.testing(data: [0x11, 0xAA, 0x55], segmentLengths: [1, 1, 1])
+    decoder.startSegment(0, raw: true)
+    #expect((0..<8).map { _ in decoder.rawDecode() } == [0, 0, 0, 1, 0, 0, 0, 1])
+    decoder.startSegment(1, raw: true)
+    #expect((0..<8).map { _ in decoder.rawDecode() } == [1, 0, 1, 0, 1, 0, 1, 0])
+    decoder.startSegment(2, raw: true)
+    #expect((0..<8).map { _ in decoder.rawDecode() } == [0, 1, 0, 1, 0, 1, 0, 1])
+    decoder.startSegment(1, raw: true)
+    #expect((0..<8).map { _ in decoder.rawDecode() } == [1, 0, 1, 0, 1, 0, 1, 0])
+}
+
 @Test func mqBudgetChargesCopyBeforeAllocation() throws {
     var budget = MemoryBudget(limit: 5)
     let decoder = try MQDecoder(data: [0, 1, 2], segmentLengths: [3], budget: &budget)
