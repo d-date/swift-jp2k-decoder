@@ -93,7 +93,10 @@ jobs:
           $machinePath = [Environment]::GetEnvironmentVariable('Path', 'Machine')
           $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
           $env:Path = "$machinePath;$userPath;$env:Path"
-          $env:Path -split ';' | ForEach-Object { $_ | Out-File -FilePath $env:GITHUB_PATH -Append }
+          # Export only the Swift entries: re-exporting the whole machine Path
+          # puts WindowsApps (WSL bash.exe) ahead of Git's bash for later steps.
+          "$machinePath;$userPath" -split ';' | Where-Object { $_ -match 'Swift' } |
+            ForEach-Object { $_ | Out-File -FilePath $env:GITHUB_PATH -Append }
           # The installer also defines SDKROOT (and friends) for new sessions
           # only; later steps need them or swiftc cannot find the stdlib.
           foreach ($name in 'SDKROOT', 'DEVELOPER_DIR', 'SWIFT_DRIVER_SWIFT_FRONTEND_EXEC') {
@@ -169,9 +172,9 @@ jobs:
       - name: Start x86_64 emulator
         run: |
           # The system image lives in a cached directory linked into the SDK.
-          mkdir -p ~/android-sdk-extra/system-images "$ANDROID_HOME/system-images"
+          mkdir -p ~/android-sdk-extra/system-images/android-35 "$ANDROID_HOME/system-images"
           ln -sfn ~/android-sdk-extra/system-images/android-35 "$ANDROID_HOME/system-images/android-35"
-          if [[ ! -d ~/android-sdk-extra/system-images/android-35/google_apis/x86_64 ]]; then
+          if [[ ! -f ~/android-sdk-extra/system-images/android-35/google_apis/x86_64/system.img ]]; then
             echo y | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "$AVD_IMAGE"
           fi
           echo y | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platform-tools' 'emulator' > /dev/null

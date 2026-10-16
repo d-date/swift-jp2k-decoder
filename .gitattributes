@@ -1,0 +1,5 @@
+# Fixtures (including text traces and the checksum manifest) are compared
+# byte-for-byte; never convert their line endings on checkout.
+Tests/JP2KTests/Fixtures/** binary
+# Shell scripts must keep LF to run under bash on every platform.
+*.sh text eol=lf
