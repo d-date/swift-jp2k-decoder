@@ -52,7 +52,6 @@ enum TileDecoder {
         var maxWidth = 1, maxHeight = 1
         for component in geometry.components.indices {
             let coding = tile.parameters.coc[component] ?? tile.parameters.cod.component
-            guard coding.codeBlockStyle == 0 else { throw .invalidCodestream(.badCodeBlock) }
             maxWidth = max(maxWidth, try Checked.shiftLeft(1, coding.codeBlockWidthExp))
             maxHeight = max(maxHeight, try Checked.shiftLeft(1, coding.codeBlockHeightExp))
         }

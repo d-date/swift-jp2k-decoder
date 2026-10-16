@@ -73,7 +73,9 @@ struct MQDecoder {
         initializeMQ()
     }
 
-    mutating func resetStates() { states = [Int](repeating: 0, count: 19) }
+    mutating func resetStates() {
+        for index in states.indices { states[index] = 0 }
+    }
 
     mutating func setState(context: Int, msb: Int, prob: Int) {
         guard (0..<19).contains(context), (0...1).contains(msb), (0..<47).contains(prob) else { return }

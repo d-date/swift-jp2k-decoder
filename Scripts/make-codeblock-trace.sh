@@ -62,3 +62,7 @@ for name in gray-378x472-53.j2k gray-378x472-97.jp2 rgb-64-53-mct.jp2 rgb-64-97.
 done
 JP2K_TRACE_ALL=1 "$work/trace" "$root/Tests/JP2KTests/Fixtures/cblk-8x8.j2k" 2> "$work/output.txt"
 grep '^BLOCK ' "$work/output.txt" > "$root/Tests/JP2KTests/Fixtures/codeblock-cblk-8x8.txt"
+for name in modes-all modes-bypass; do
+    JP2K_TRACE_ALL=1 "$work/trace" "$root/Tests/JP2KTests/Fixtures/$name.j2k" 2> "$work/output.txt"
+    grep '^BLOCK ' "$work/output.txt" > "$root/Tests/JP2KTests/Fixtures/codeblock-$name.txt"
+done

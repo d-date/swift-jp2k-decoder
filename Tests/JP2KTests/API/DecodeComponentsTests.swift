@@ -43,14 +43,6 @@ struct DecodeComponentsTests {
         }
     }
 
-    @Test func unsupportedCodeBlockMode() throws {
-        let url = try #require(Fixtures.url("modes-bypass.j2k"))
-        let bytes = Array(try Data(contentsOf: url))
-        #expect(throws: JP2KError.invalidCodestream(.badCodeBlock)) {
-            _ = try JP2KDecoder().decodeComponents(bytes)
-        }
-    }
-
     @Test func concurrentDecode() async throws {
         let bytes = Array(try Data(contentsOf: #require(Fixtures.url("gray-378x472-97.jp2"))))
         // One shared decoder value used from eight tasks at once (it is Sendable).
