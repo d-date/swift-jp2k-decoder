@@ -5,20 +5,22 @@
 set -euo pipefail
 
 repo_root=$(cd "$(dirname "$0")/.." && pwd)
-source_dir="${OPJ_SRC:-$repo_root/.reference/openjpeg}/src/lib/openjp2"
+source_root="${OPJ_SRC:-$repo_root/.reference/openjpeg}/src"
+source_dir="$source_root/lib/openjp2"
 if [[ ! -d "$source_dir" ]]; then
     echo "OpenJPEG source not found at $source_dir (set OPJ_SRC)" >&2
     exit 2
 fi
 
-python3 -I - "$repo_root" "$source_dir" "${1:-}" <<'PY'
+python3 -I - "$repo_root" "$source_root" "${1:-}" <<'PY'
 import pathlib, re, sys
 
-repo, source_dir, mode = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2]), sys.argv[3]
+repo, source_root, mode = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2]), sys.argv[3]
 copyright = re.compile(r"^ \* Copyright \(c\)")
 
 def holders(c_file):
-    lines = (source_dir / c_file).read_text(encoding="utf-8", errors="replace").splitlines()
+    source_file = source_root / ("bin/common" if c_file == "color.c" else "lib/openjp2") / c_file
+    lines = source_file.read_text(encoding="utf-8", errors="replace").splitlines()
     return [line for line in lines[:60] if copyright.match(line)]
 
 failed = False

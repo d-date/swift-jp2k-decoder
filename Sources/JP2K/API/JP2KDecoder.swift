@@ -118,4 +118,39 @@ public struct JP2KDecoder: Sendable {
         return ComponentImage(info: info, components: components, iccProfile: profile)
     }
 
+    /// Decodes to eight-bit interleaved pixels.
+    public func decodePixels(_ bytes: Span<UInt8>, color: ColorInterpretation = .container,
+                             region: Region? = nil) throws(JP2KError) -> PixelImage {
+        if bytes.count < 12 || bytes.count > limits.maxInputBytes { throw .inputSize }
+        var context = DecodeContext(limits: limits)
+        try context.budget.reserve(bytes: bytes.count)
+        var input: [UInt8] = []
+        input.reserveCapacity(bytes.count)
+        for index in 0..<bytes.count { input.append(bytes[index]) }
+        return try decodePixelsArray(input, color: color, region: region, context: &context)
+    }
+
+    /// Decodes to eight-bit interleaved pixels.
+    public func decodePixels(_ bytes: [UInt8], color: ColorInterpretation = .container,
+                             region: Region? = nil) throws(JP2KError) -> PixelImage {
+        if bytes.count < 12 || bytes.count > limits.maxInputBytes { throw .inputSize }
+        var context = DecodeContext(limits: limits)
+        try context.budget.reserve(bytes: bytes.count)
+        return try decodePixelsArray(bytes, color: color, region: region, context: &context)
+    }
+
+    private func decodePixelsArray(_ input: [UInt8], color: ColorInterpretation, region: Region?,
+                                   context: inout DecodeContext) throws(JP2KError) -> PixelImage {
+        let (info, header, file) = try parseInfoArray(input, context: &context)
+        let tileParts = try TilePartParser.parse(input, header: header, context: &context)
+        try context.budget.reserve(bytes: try Checked.mul(tileParts.count, MemoryLayout<TileGeometry>.stride))
+        var tiles: [TileGeometry] = []
+        tiles.reserveCapacity(tileParts.count)
+        for tile in tileParts { tiles.append(try TileDecoder.decode(tile, header: header, context: &context)) }
+        let components = try ComponentAssembler.assemble(tiles, info: info, context: &context)
+        let image = ComponentImage(info: info, components: components, iccProfile: nil)
+        return try ColorConverter.convert(image, header: file?.header, color: color, region: region,
+                                          referenceOrigin: (header.geometry.x0, header.geometry.y0), context: &context)
+    }
+
 }

@@ -105,6 +105,7 @@ for entry in bypass:1 reset:2 termall:4 vcausal:8 pterm:16 segsym:32 all:63; do
 done
 encode roi.j2k small.pgm -n 5 -ROI c=0,U=4
 encode subsampled.j2k small.pgm -n 5 -s 2,2
+encode subsampled-4x.j2k small.pgm -n 5 -s 4,4
 encode subsampled-rgb.j2k rgb.ppm -n 5 -s 2,2
 encode sop-eph.j2k small.pgm -n 5 -SOP -EPH
 encode origin.j2k small.pgm -n 5 -d 3,5 -T 1,2

@@ -1,3 +1,7 @@
+ColorInterpretation | enum ColorInterpretation
+ColorInterpretation.assume(_:) | case assume(PixelFormat)
+ColorInterpretation.container | case container
+ColorInterpretation.inferFromComponentCount | case inferFromComponentCount
 ColorSpace | enum ColorSpace
 ColorSpace.!=(_:_:) | static func != (lhs: borrowing Self, rhs: borrowing Self) -> Bool
 ColorSpace.grayscale | case grayscale
@@ -29,6 +33,8 @@ ImageInfo.width | let width: Int
 JP2KDecoder | struct JP2KDecoder
 JP2KDecoder.decodeComponents(_:) | func decodeComponents(_ bytes: Span<UInt8>) throws(JP2KError) -> ComponentImage
 JP2KDecoder.decodeComponents(_:) | func decodeComponents(_ bytes: [UInt8]) throws(JP2KError) -> ComponentImage
+JP2KDecoder.decodePixels(_:color:region:) | func decodePixels(_ bytes: Span<UInt8>, color: ColorInterpretation = .container, region: Region? = nil) throws(JP2KError) -> PixelImage
+JP2KDecoder.decodePixels(_:color:region:) | func decodePixels(_ bytes: [UInt8], color: ColorInterpretation = .container, region: Region? = nil) throws(JP2KError) -> PixelImage
 JP2KDecoder.init(limits:) | init(limits: Limits = Limits())
 JP2KDecoder.limits | var limits: Limits
 JP2KDecoder.readInfo(_:) | func readInfo(_ bytes: Span<UInt8>) throws(JP2KError) -> ImageInfo
@@ -126,3 +132,19 @@ Limits.maxPackets | var maxPackets: Int
 Limits.maxPixels | var maxPixels: Int
 Limits.maxTileParts | var maxTileParts: Int
 Limits.maxTiles | var maxTiles: Int
+PixelFormat | enum PixelFormat
+PixelFormat.!=(_:_:) | static func != (lhs: borrowing Self, rhs: borrowing Self) -> Bool
+PixelFormat.gray8 | case gray8
+PixelFormat.grayAlpha8 | case grayAlpha8
+PixelFormat.rgb8 | case rgb8
+PixelFormat.rgba8 | case rgba8
+PixelImage | struct PixelImage
+PixelImage.bmp() | borrowing func bmp() throws(JP2KError) -> [UInt8]
+PixelImage.colorWasInferred | let colorWasInferred: Bool
+PixelImage.format | let format: PixelFormat
+PixelImage.height | let height: Int
+PixelImage.pixels | let pixels: [UInt8]
+PixelImage.width | let width: Int
+Region | enum Region
+Region.fraction(left:top:right:bottom:) | case fraction(left: Double, top: Double, right: Double, bottom: Double)
+Region.pixels(x:y:width:height:) | case pixels(x: Int, y: Int, width: Int, height: Int)
