@@ -129,6 +129,13 @@ jobs:
       ANDROID_NDK_HOME: ${{ github.workspace }}/../android-ndk-r30
       AVD_IMAGE: system-images;android-35;google_apis;x86_64
     steps:
+      # The Swift toolchain, Swift Android SDK, NDK and emulator image do not
+      # fit next to the runner's preinstalled toolsets; drop unused ones.
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup /usr/local/share/boost \
+            /opt/hostedtoolcache/CodeQL /usr/local/lib/android/sdk/ndk /usr/share/swift
+          df -h /
       - uses: actions/checkout@v4
       # Toolchain, Swift SDK, NDK and emulator image are version-pinned, so
       # they are restored from cache instead of downloaded on every run.
