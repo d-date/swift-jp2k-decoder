@@ -41,6 +41,8 @@ jobs:
         env:
           JP2K_CONFORMANCE_DIR: ${{ github.workspace }}/.conformance-data
         run: swift test
+      - name: Release decode timing
+        run: swift run -c release jp2k-bench --quick
       - name: Check public API
         run: bash Scripts/api-dump.sh | diff -u docs/api.txt -
 
@@ -97,6 +99,9 @@ jobs:
         env:
           JP2K_CONFORMANCE_DIR: ${{ github.workspace }}/.conformance-data
         run: swift test
+      - name: Release decode timing
+        shell: pwsh
+        run: swift run -c release jp2k-bench --quick
 
   android:
     timeout-minutes: 40
