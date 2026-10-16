@@ -44,7 +44,10 @@ jobs:
       - name: Release decode timing
         run: swift run -c release jp2k-bench --quick
       - name: Check public API
-        run: bash Scripts/api-dump.sh | diff -u docs/api.txt -
+        run: |
+          # The swift image has no Python; api-dump.sh formats the symbol graph with it.
+          apt-get update -qq && apt-get install -y -qq --no-install-recommends python3 > /dev/null
+          bash Scripts/api-dump.sh | diff -u docs/api.txt -
 
   windows:
     timeout-minutes: 40
@@ -91,6 +94,16 @@ jobs:
           $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
           $env:Path = "$machinePath;$userPath;$env:Path"
           $env:Path -split ';' | ForEach-Object { $_ | Out-File -FilePath $env:GITHUB_PATH -Append }
+          # The installer also defines SDKROOT (and friends) for new sessions
+          # only; later steps need them or swiftc cannot find the stdlib.
+          foreach ($name in 'SDKROOT', 'DEVELOPER_DIR', 'SWIFT_DRIVER_SWIFT_FRONTEND_EXEC') {
+            $value = [Environment]::GetEnvironmentVariable($name, 'Machine')
+            if (-not $value) { $value = [Environment]::GetEnvironmentVariable($name, 'User') }
+            if ($value) {
+              "$name=$value" | Out-File -FilePath $env:GITHUB_ENV -Append
+              Set-Item -Path "env:$name" -Value $value
+            }
+          }
           swift --version
       - name: Fetch conformance data
         run: bash Scripts/fetch-conformance.sh .conformance-data
@@ -139,6 +152,8 @@ jobs:
         run: |
           curl -fsSL "https://download.swift.org/swiftly/linux/swiftly-$(uname -m).tar.gz" -o "$RUNNER_TEMP/swiftly.tar.gz"
           tar -xzf "$RUNNER_TEMP/swiftly.tar.gz" -C "$RUNNER_TEMP"
+          # swiftly refuses to finish without the toolchain's system dependency.
+          sudo apt-get update -qq && sudo apt-get install -y -qq libcurl4-openssl-dev > /dev/null
           "$RUNNER_TEMP/swiftly" init --quiet-shell-followup --assume-yes --skip-install
           "$HOME/.local/share/swiftly/bin/swiftly" install 6.4.1
           "$HOME/.local/share/swiftly/bin/swift" sdk install "$SWIFT_ANDROID_SDK_URL" --checksum "$SWIFT_ANDROID_SDK_CHECKSUM"
