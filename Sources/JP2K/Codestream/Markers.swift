@@ -40,7 +40,7 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  */
-// Ported from OpenJPEG v2.5.4: j2k.c: opj_j2k_dec_mstab_lookup
+// Ported from OpenJPEG v2.5.4: j2k.c: opj_j2k_get_marker_handler
 enum Marker {
     static let soc: UInt16 = 0xFF4F
     static let siz: UInt16 = 0xFF51

@@ -40,7 +40,7 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  */
-// Ported from OpenJPEG v2.5.4: tcd.c: opj_tcd_init_tile, opj_tcd_code_block_dec_allocate; dwt.c: opj_dwt_getgain, opj_dwt_calc_explicit_stepsizes; t2.c: opj_t2_read_packet_data
+// Ported from OpenJPEG v2.5.4: tcd.c: opj_tcd_init_tile, opj_tcd_code_block_dec_allocate; dwt.c: opj_dwt_calc_explicit_stepsizes; t2.c: opj_t2_read_packet_data
 struct CodeBlockSegment {
     var passes = 0
     var maxPasses = 0
