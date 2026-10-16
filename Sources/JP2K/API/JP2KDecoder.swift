@@ -5,7 +5,8 @@ public struct JP2KDecoder: Sendable {
     public init(limits: Limits = Limits()) { self.limits = limits }
 
     public func readInfo(_ bytes: Span<UInt8>) throws(JP2KError) -> ImageInfo {
-        if bytes.count < 12 || bytes.count > limits.maxInputBytes { throw .inputSize }
+        if bytes.count < 12 { throw .inputSize }
+        if bytes.count > limits.maxInputBytes { throw .limitExceeded(.inputBytes) }
         var context = DecodeContext(limits: limits)
         try context.budget.reserve(bytes: bytes.count)
         var input: [UInt8] = []
@@ -80,7 +81,8 @@ public struct JP2KDecoder: Sendable {
     }
 
     public func readInfo(_ bytes: [UInt8]) throws(JP2KError) -> ImageInfo {
-        if bytes.count < 12 || bytes.count > limits.maxInputBytes { throw .inputSize }
+        if bytes.count < 12 { throw .inputSize }
+        if bytes.count > limits.maxInputBytes { throw .limitExceeded(.inputBytes) }
         var context = DecodeContext(limits: limits)
         try context.budget.reserve(bytes: bytes.count)
         return try readInfoArray(bytes, context: &context)
@@ -88,7 +90,8 @@ public struct JP2KDecoder: Sendable {
 
     /// Decodes every codestream component at its native precision.
     public func decodeComponents(_ bytes: Span<UInt8>) throws(JP2KError) -> ComponentImage {
-        if bytes.count < 12 || bytes.count > limits.maxInputBytes { throw .inputSize }
+        if bytes.count < 12 { throw .inputSize }
+        if bytes.count > limits.maxInputBytes { throw .limitExceeded(.inputBytes) }
         var context = DecodeContext(limits: limits)
         try context.budget.reserve(bytes: bytes.count)
         var input: [UInt8] = []
@@ -99,7 +102,8 @@ public struct JP2KDecoder: Sendable {
 
     /// Decodes every codestream component at its native precision.
     public func decodeComponents(_ bytes: [UInt8]) throws(JP2KError) -> ComponentImage {
-        if bytes.count < 12 || bytes.count > limits.maxInputBytes { throw .inputSize }
+        if bytes.count < 12 { throw .inputSize }
+        if bytes.count > limits.maxInputBytes { throw .limitExceeded(.inputBytes) }
         var context = DecodeContext(limits: limits)
         try context.budget.reserve(bytes: bytes.count)
         return try decodeComponentsArray(bytes, context: &context)
@@ -118,10 +122,22 @@ public struct JP2KDecoder: Sendable {
         return ComponentImage(info: info, components: components, iccProfile: profile)
     }
 
+    func decodeComponentsWithMetrics(_ bytes: [UInt8]) throws(JP2KError) -> (ComponentImage, DecodeMetrics) {
+        if bytes.count < 12 { throw .inputSize }
+        if bytes.count > limits.maxInputBytes { throw .limitExceeded(.inputBytes) }
+        var context = DecodeContext(limits: limits)
+        try context.budget.reserve(bytes: bytes.count)
+        let image = try decodeComponentsArray(bytes, context: &context)
+        return (image, DecodeMetrics(packets: context.packets, packetWork: context.packetWork,
+                                     codingPasses: context.codingPasses, markerDataBytes: context.markerDataBytes,
+                                     peakMemoryBytes: context.budget.peak))
+    }
+
     /// Decodes to eight-bit interleaved pixels.
     public func decodePixels(_ bytes: Span<UInt8>, color: ColorInterpretation = .container,
                              region: Region? = nil) throws(JP2KError) -> PixelImage {
-        if bytes.count < 12 || bytes.count > limits.maxInputBytes { throw .inputSize }
+        if bytes.count < 12 { throw .inputSize }
+        if bytes.count > limits.maxInputBytes { throw .limitExceeded(.inputBytes) }
         var context = DecodeContext(limits: limits)
         try context.budget.reserve(bytes: bytes.count)
         var input: [UInt8] = []
@@ -133,7 +149,8 @@ public struct JP2KDecoder: Sendable {
     /// Decodes to eight-bit interleaved pixels.
     public func decodePixels(_ bytes: [UInt8], color: ColorInterpretation = .container,
                              region: Region? = nil) throws(JP2KError) -> PixelImage {
-        if bytes.count < 12 || bytes.count > limits.maxInputBytes { throw .inputSize }
+        if bytes.count < 12 { throw .inputSize }
+        if bytes.count > limits.maxInputBytes { throw .limitExceeded(.inputBytes) }
         var context = DecodeContext(limits: limits)
         try context.budget.reserve(bytes: bytes.count)
         return try decodePixelsArray(bytes, color: color, region: region, context: &context)
@@ -153,4 +170,12 @@ public struct JP2KDecoder: Sendable {
                                           referenceOrigin: (header.geometry.x0, header.geometry.y0), context: &context)
     }
 
+}
+
+struct DecodeMetrics {
+    let packets: Int
+    let packetWork: Int
+    let codingPasses: Int
+    let markerDataBytes: Int
+    let peakMemoryBytes: Int
 }

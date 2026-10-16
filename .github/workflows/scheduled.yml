@@ -25,6 +25,24 @@ jobs:
           name: fuzz-artifacts
           path: Fuzz/artifacts
 
+  # Full truncation / bit-flip sweep over every fixture (Task 17); too slow for
+  # every push, so it runs here in release mode, on demand.
+  exhaustive-corrupt:
+    timeout-minutes: 120
+    runs-on: ubuntu-24.04
+    container: swift:6.4-noble
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: .build
+          key: spm-linux-release-6.4.1-${{ hashFiles('Package.swift', 'Package.resolved', 'Sources/**', 'Tests/**') }}
+          restore-keys: spm-linux-release-6.4.1-
+      - name: Exhaustive corrupt-input sweep
+        env:
+          JP2K_EXHAUSTIVE: "1"
+        run: swift test -c release --filter CorruptCorpusTests
+
   benchmark:
     timeout-minutes: 300
     runs-on: ubuntu-24.04

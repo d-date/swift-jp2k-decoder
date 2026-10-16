@@ -2,6 +2,7 @@
 struct MemoryBudget {
     let limit: Int
     private(set) var used: Int = 0
+    private(set) var peak: Int = 0
 
     init(limit: Int) { self.limit = limit }
 
@@ -10,6 +11,7 @@ struct MemoryBudget {
             throw .limitExceeded(.memory)
         }
         used += bytes
+        peak = max(peak, used)
     }
 
     mutating func release(bytes: Int) {
@@ -49,6 +51,7 @@ struct MemoryBudget {
             let actualBytes = array.capacity &* stride
             if actualBytes > newBytes {
                 used = used.addingReportingOverflow(actualBytes - newBytes).overflow ? Int.max : used + (actualBytes - newBytes)
+                peak = max(peak, used)
             } else if actualBytes < newBytes {
                 release(bytes: newBytes - actualBytes)
             }

@@ -128,6 +128,7 @@ Limits.maxInputBytes | var maxInputBytes: Int
 Limits.maxLayers | var maxLayers: Int
 Limits.maxMarkerDataBytes | var maxMarkerDataBytes: Int
 Limits.maxMemoryBytes | var maxMemoryBytes: Int
+Limits.maxPacketIterations | var maxPacketIterations: Int
 Limits.maxPackets | var maxPackets: Int
 Limits.maxPixels | var maxPixels: Int
 Limits.maxTileParts | var maxTileParts: Int

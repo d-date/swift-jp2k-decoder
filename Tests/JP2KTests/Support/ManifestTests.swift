@@ -18,8 +18,15 @@ struct ManifestTests {
             let actual = SHA256.hex(Array(try Data(contentsOf: url)))
             #expect(actual == parts[0], "Checksum mismatch: \(name)")
         }
-        let files = try FileManager.default.contentsOfDirectory(atPath: manifestURL.deletingLastPathComponent().path)
-        #expect(listed == Set(files.filter { $0 != "MANIFEST.sha256" }))
+        let directory = manifestURL.deletingLastPathComponent()
+        let entries = try #require(FileManager.default.enumerator(at: directory, includingPropertiesForKeys: [.isRegularFileKey]))
+        var files: Set<String> = []
+        for case let url as URL in entries {
+            guard try url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true else { continue }
+            let name = String(url.path.dropFirst(directory.path.count + 1))
+            if name != "MANIFEST.sha256" { files.insert(name) }
+        }
+        #expect(listed == files)
         #expect(!listed.isEmpty)
     }
 }

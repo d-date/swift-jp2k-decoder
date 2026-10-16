@@ -87,7 +87,9 @@ enum MainHeaderParser {
             if reader.remaining < 2 { throw .invalidCodestream(.badMarkerLength) }
             let length = try Checked.int(reader.u16())
             if length < 2 || length - 2 > reader.remaining { throw .invalidCodestream(.badMarkerLength) }
-            try context.countMarkerData(length - 2)
+            if ![Marker.tlm, Marker.plm, Marker.crg, Marker.com].contains(marker) {
+                try context.countMarkerData(length - 2)
+            }
             let segment = try reader.subReader(length: length - 2)
             switch marker {
             case Marker.siz:

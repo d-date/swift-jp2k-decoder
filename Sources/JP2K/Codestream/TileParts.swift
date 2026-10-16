@@ -133,7 +133,9 @@ enum TilePartParser {
                 if end - reader.offset < 2 { throw .invalidCodestream(.badMarkerLength) }
                 let length = try Checked.int(reader.u16())
                 if length < 2 || length - 2 > end - reader.offset { throw .invalidCodestream(.badMarkerLength) }
-                try context.countMarkerData(length - 2)
+                if code != 0xFF58 && code != Marker.com {
+                    try context.countMarkerData(length - 2)
+                }
                 let payload = try reader.subReader(length: length - 2)
                 try apply(code, payload: payload, state: &state, header: header, context: &context)
             }

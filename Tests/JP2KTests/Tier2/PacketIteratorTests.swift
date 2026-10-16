@@ -189,8 +189,8 @@ func spatialProgressionsMatchOpenJPEG(_ order: ProgressionOrder) throws {
     var limits = Limits()
     limits.maxPackets = 1
     var context = DecodeContext(limits: limits)
-    for _ in 0..<1_000_000 { try context.countPacketWork() }
-    #expect(context.packetWork == 1_000_000)
+    for _ in 0..<limits.maxPacketIterations { try context.countPacketWork() }
+    #expect(context.packetWork == limits.maxPacketIterations)
     #expect(throws: JP2KError.limitExceeded(.packetIteration)) {
         try context.countPacketWork()
     }
@@ -201,6 +201,7 @@ func spatialProgressionsMatchOpenJPEG(_ order: ProgressionOrder) throws {
     let bytes = Array(try Data(contentsOf: try #require(Fixtures.url("prog-lrcp.j2k"))))
     var limits = Limits()
     limits.maxPackets = 1
+    limits.maxPacketIterations = 100_000
     var context = DecodeContext(limits: limits)
     let header = try MainHeaderParser.parse(bytes, range: 0..<bytes.count, context: &context)
     let tile = try #require(TilePartParser.parse(bytes, header: header, context: &context).first)

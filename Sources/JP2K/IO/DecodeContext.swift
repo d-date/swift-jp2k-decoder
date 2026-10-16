@@ -17,9 +17,7 @@ struct DecodeContext {
     }
 
     mutating func countPacketWork() throws(JP2KError) {
-        let (scaled, overflow) = limits.maxPackets.multipliedReportingOverflow(by: 16)
-        let maximum = max(1_000_000, overflow ? Int.max : scaled)
-        try count(1, current: &packetWork, maximum: maximum, kind: .packetIteration)
+        try count(1, current: &packetWork, maximum: limits.maxPacketIterations, kind: .packetIteration)
     }
 
     mutating func countCodingPasses(_ n: Int) throws(JP2KError) {
