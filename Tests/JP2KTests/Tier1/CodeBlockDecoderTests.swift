@@ -104,6 +104,26 @@ func codeBlocksMatchOpenJPEG(_ name: String) throws {
     }
 }
 
+@Test func negativeNominalBitPlanesUseROISumBounds() throws {
+    var budget = MemoryBudget(limit: 1 << 20)
+    var decoder = try CodeBlockDecoder(maxWidth: 1, maxHeight: 1, budget: &budget)
+    let block = CodeBlock(x0: 0, y0: 0, x1: 1, y1: 1)
+    try decoder.decode(block, orientation: 0, roiShift: 2,
+                       codeBlockStyle: 0, numBitPlanes: -1, budget: &budget)
+    #expect(decoder.outputCount == 1)
+    try decoder.decode(block, orientation: 0, roiShift: 31,
+                       codeBlockStyle: 0, numBitPlanes: -1, budget: &budget)
+    #expect(decoder.outputCount == 1)
+    #expect(throws: JP2KError.invalidCodestream(.badCodeBlock)) {
+        try decoder.decode(block, orientation: 0, roiShift: 1,
+                           codeBlockStyle: 0, numBitPlanes: -2, budget: &budget)
+    }
+    #expect(throws: JP2KError.invalidCodestream(.badCodeBlock)) {
+        try decoder.decode(block, orientation: 0, roiShift: 32,
+                           codeBlockStyle: 0, numBitPlanes: -1, budget: &budget)
+    }
+}
+
 
 @Test func codeBlockRejectsInvalidGeometryAndStyle() throws {
     var budget = MemoryBudget(limit: 1 << 20)

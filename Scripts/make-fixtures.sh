@@ -42,6 +42,7 @@ pnm('gray.pgm', 378, 472, 1, 255)
 pnm('small.pgm', 127, 61, 1, 255)
 pnm('rgb.ppm', 64, 64, 3, 255)
 pnm('gray16.pgm', 40, 30, 1, 65535)
+(root / 'empty-leading-tile.pgm').write_bytes(b'P5\n1 1\n255\n\x88')
 # Raw inputs need their own layouts. OpenJPEG's PGX reader derives precision
 # from the positive maximum, which cannot preserve signed 12-bit precision.
 raw = bytearray()
@@ -80,6 +81,21 @@ for progression in LRCP RLCP RPCL PCRL CPRL; do
 done
 encode tiles-127x61.j2k small.pgm -t 32,16 -n 5
 encode tileparts.j2k small.pgm -t 32,16 -TP R -n 5
+encode two-tiles-127x61.j2k small.pgm -t 64,61 -TP R -n 5
+"$compress" -i "$work/empty-leading-tile.pgm" -o "$work/empty-leading-tile-source.j2k" -s 2,1 -t 2,1 -n 1 >/dev/null 2>&1
+python3 -I - "$work/empty-leading-tile-source.j2k" "$out/empty-leading-tile.j2k" <<'PY'
+import pathlib, sys
+data = bytearray(pathlib.Path(sys.argv[1]).read_bytes())
+siz = data.index(b'\xff\x51') + 4
+sot = data.index(b'\xff\x90')
+# The first tile spans [0, 2), while the image starts at x=1 and its
+# subsampled component has its only sample at x=2 (in tile 1).
+data[siz + 2:siz + 6] = (3).to_bytes(4, 'big')
+data[siz + 10:siz + 14] = (1).to_bytes(4, 'big')
+data[sot + 4:sot + 6] = (1).to_bytes(2, 'big')
+pathlib.Path(sys.argv[2]).write_bytes(data)
+PY
+"$decompress" -i "$out/empty-leading-tile.j2k" -o "$out/empty-leading-tile.pgx" >/dev/null 2>&1
 encode poc.j2k rgb.ppm -n 5 -POC 'T1=0,0,1,3,2,CPRL/T1=3,0,1,5,3,LRCP'
 encode precincts.j2k small.pgm -n 5 -c '[16,16],[8,8]'
 encode cblk-8x8.j2k small.pgm -n 5 -b 8,8

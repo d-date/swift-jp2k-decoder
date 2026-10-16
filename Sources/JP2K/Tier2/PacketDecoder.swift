@@ -122,7 +122,6 @@ enum PacketDecoder {
                     let bandX1 = geometry.components[position.component].resolutions[position.resolution].bands[bandIndex].x1
                     let bandY0 = geometry.components[position.component].resolutions[position.resolution].bands[bandIndex].y0
                     let bandY1 = geometry.components[position.component].resolutions[position.resolution].bands[bandIndex].y1
-                    let bandBitPlanes = geometry.components[position.component].resolutions[position.resolution].bands[bandIndex].numBitPlanes
                     if bandX0 >= bandX1 || bandY0 >= bandY1 { continue }
                     let treeBytes = try Checked.add(
                         geometry.components[position.component].resolutions[position.resolution]
@@ -155,9 +154,9 @@ enum PacketDecoder {
                         }
                         let passes = try numberOfPasses(&bits)
                         let newTotal = try Checked.add(precinct.codeBlocks[blockIndex].totalPasses, passes)
-                        let bitPlanes = try Checked.sub(Checked.add(bandBitPlanes, 1), precinct.codeBlocks[blockIndex].zeroBitPlanes)
-                        let maximum = bitPlanes > 0 ? min(109, try Checked.sub(Checked.mul(3, bitPlanes), 2)) : 0
-                        if newTotal > maximum { throw .invalidCodestream(.badPacketHeader) }
+                        // ROI can make the zero-bitplane count exceed the band's nominal bitplanes.
+                        // OpenJPEG accepts those packets; the fixed Part 1 pass ceiling still applies.
+                        if newTotal > 109 { throw .invalidCodestream(.badPacketHeader) }
                         try context.countCodingPasses(passes)
                         let increment = try commaCode(&bits)
                         precinct.codeBlocks[blockIndex].numLenBits = try Checked.add(precinct.codeBlocks[blockIndex].numLenBits, increment)

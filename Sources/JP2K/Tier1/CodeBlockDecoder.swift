@@ -68,12 +68,17 @@ struct CodeBlockDecoder: ~Copyable {
         let width = try Checked.sub(block.x1, block.x0)
         let height = try Checked.sub(block.y1, block.y0)
         guard width > 0, height > 0, width <= maxWidth, height <= maxHeight,
-              (0...3).contains(orientation), roiShift >= 0, numBitPlanes >= 0,
+              (0...3).contains(orientation), roiShift >= 0,
               codeBlockStyle & 0xC0 == 0 else { throw .invalidCodestream(.badCodeBlock) }
-        guard numBitPlanes < 31, roiShift < 31, numBitPlanes <= 30 - roiShift else {
+        let planes: Int
+        do {
+            planes = try Checked.add(numBitPlanes, roiShift)
+        } catch {
             throw .invalidCodestream(.badCodeBlock)
         }
-        let planes = try Checked.add(numBitPlanes, roiShift)
+        guard planes >= 0, planes < 31 else {
+            throw .invalidCodestream(.badCodeBlock)
+        }
         let count = try Checked.mul(width, height)
         let stride = try Checked.add(width, 2)
         let flagRows = try Checked.add(try Checked.ceilDiv(height, 4), 2)

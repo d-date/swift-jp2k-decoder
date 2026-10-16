@@ -11,6 +11,12 @@ struct PGXTests {
         #expect(image.samples == [0, 127, 128, 255])
     }
 
+    @Test func parsesUnsignedEightBitWithBlankSign() throws {
+        let image = try PGX.parse(Array("PG ML  8 2 1\n".utf8) + [0, 255])
+        #expect(!image.signed)
+        #expect(image.samples == [0, 255])
+    }
+
     @Test func parsesSignedSixteenBitAndLittleEndian() throws {
         let big = try PGX.parse(Array("PG ML -16 2 1\n".utf8) + [0xff, 0xfe, 0x7f, 0xff])
         let little = try PGX.parse(Array("PG LM -16 2 1\n".utf8) + [0xfe, 0xff, 0xff, 0x7f])

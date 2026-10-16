@@ -61,6 +61,66 @@ func packetFixtureDecodes(_ name: String) throws {
     }
 }
 
+private func singleBlockPacket(passes: Int) throws -> (TileData, TileGeometry, DecodeContext) {
+    let fixture = Array(try Data(contentsOf: #require(Fixtures.url("gray-378x472-53.j2k"))))
+    var context = DecodeContext(limits: Limits())
+    let header = try MainHeaderParser.parse(fixture, range: 0..<fixture.count, context: &context)
+    var budget = MemoryBudget(limit: 1 << 20)
+    let inclusion = try TagTree(leavesWide: 1, leavesHigh: 1, budget: &budget)
+    let zeros = try TagTree(leavesWide: 1, leavesHigh: 1, budget: &budget)
+    let precinct = Precinct(x0: 0, y0: 0, x1: 1, y1: 1,
+                            codeBlocksWide: 1, codeBlocksHigh: 1,
+                            codeBlocks: [CodeBlock(x0: 0, y0: 0, x1: 1, y1: 1)],
+                            inclusionTree: inclusion, zeroBitPlaneTree: zeros)
+    let band = Band(orientation: 0, x0: 0, y0: 0, x1: 1, y1: 1,
+                    precincts: [precinct], stepSize: 1, numBitPlanes: 1)
+    let resolution = Resolution(x0: 0, y0: 0, x1: 1, y1: 1,
+                                precinctsWide: 1, precinctsHigh: 1, bands: [band])
+    let geometry = TileGeometry(x0: 0, y0: 0, x1: 1, y1: 1,
+                                components: [TileComponent(x0: 0, y0: 0, x1: 1, y1: 1,
+                                                           resolutions: [resolution], coefficients: [])])
+    // Present, included, two zero bitplanes, then the OpenJPEG 37...164 pass code.
+    let prefix = "1101" + "111111111" + String(passes - 37, radix: 2).leftPadded(to: 7)
+    let bits = prefix + "0" + String(repeating: "0", count: 9)
+    var body: [UInt8] = []
+    var cursor = 0
+    while cursor < bits.count {
+        let width = body.last == 0xFF ? 7 : 8
+        let end = min(cursor + width, bits.count)
+        let value = try #require(UInt8(bits[bits.index(bits.startIndex, offsetBy: cursor)..<bits.index(bits.startIndex, offsetBy: end)], radix: 2))
+        body.append(value << (width - (end - cursor)))
+        cursor = end
+    }
+    let tile = TileData(index: 0, parameters: TileCodingParameters(cod: header.cod, coc: header.coc,
+                        qcd: header.qcd, qcc: header.qcc, rgn: header.rgn, poc: header.poc),
+                        body: body, packedPacketHeaders: nil, tilePartCount: 1)
+    return (tile, geometry, context)
+}
+
+private extension String {
+    func leftPadded(to width: Int) -> String { String(repeating: "0", count: max(0, width - count)) + self }
+}
+
+@Test func packetROIZeroBitplanesAndExactPassCeiling() throws {
+    let position = [PacketPosition(layer: 0, resolution: 0, component: 0, precinct: 0)]
+    let acceptedCase = try singleBlockPacket(passes: 109)
+    let accepted = acceptedCase.0
+    var geometry = acceptedCase.1
+    var context = acceptedCase.2
+    try PacketDecoder.decodeTile(accepted, geometry: &geometry, positions: position, context: &context)
+    let block = geometry.components[0].resolutions[0].bands[0].precincts[0].codeBlocks[0]
+    #expect(block.zeroBitPlanes == 2)
+    #expect(block.totalPasses == 109)
+    let rejectedCase = try singleBlockPacket(passes: 110)
+    let rejected = rejectedCase.0
+    var rejectedGeometry = rejectedCase.1
+    var rejectedContext = rejectedCase.2
+    #expect(throws: JP2KError.invalidCodestream(.badPacketHeader)) {
+        try PacketDecoder.decodeTile(rejected, geometry: &rejectedGeometry,
+                                     positions: position, context: &rejectedContext)
+    }
+}
+
 private func packetMemory(_ name: String, limit: Int) throws -> (steady: Int, data: Int, records: Int) {
     let bytes = Array(try Data(contentsOf: try #require(Fixtures.url(name))))
     var limits = Limits()

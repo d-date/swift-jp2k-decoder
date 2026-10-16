@@ -192,8 +192,13 @@ enum TilePartParser {
         var result: [TileData] = []
         try context.budget.reserve(bytes: try Checked.mul(tileCount, MemoryLayout<TileData>.stride))
         result.reserveCapacity(tileCount)
-        for stateValue in states {
-            guard var state = stateValue else { throw .invalidCodestream(.badTilePart) }
+        for index in states.indices {
+            guard var state = states[index] else {
+                if try tileHasSamples(index, geometry: header.geometry) {
+                    throw .invalidCodestream(.badTilePart)
+                }
+                continue
+            }
             if state.expectedParts != 0 && state.data.tilePartCount != state.expectedParts {
                 throw .invalidCodestream(.badTilePart)
             }
@@ -210,6 +215,27 @@ enum TilePartParser {
             result.append(state.data)
         }
         return result
+    }
+
+    private static func tileHasSamples(_ index: Int, geometry: ImageGeometry) throws(JP2KError) -> Bool {
+        let column = index % geometry.tilesAcross
+        let row = index / geometry.tilesAcross
+        let tileX = try Checked.add(geometry.tileX0, Checked.mul(column, geometry.tileWidth))
+        let tileY = try Checked.add(geometry.tileY0, Checked.mul(row, geometry.tileHeight))
+        let x0 = max(geometry.x0, tileX)
+        let y0 = max(geometry.y0, tileY)
+        let x1 = min(geometry.x1, try Checked.add(tileX, geometry.tileWidth))
+        let y1 = min(geometry.y1, try Checked.add(tileY, geometry.tileHeight))
+        for component in geometry.components {
+            let componentX0 = try Checked.ceilDiv(x0, component.dx)
+            let componentX1 = try Checked.ceilDiv(x1, component.dx)
+            let componentY0 = try Checked.ceilDiv(y0, component.dy)
+            let componentY1 = try Checked.ceilDiv(y1, component.dy)
+            if componentX0 < componentX1 && componentY0 < componentY1 {
+                return true
+            }
+        }
+        return false
     }
 
     private static func apply(_ code: UInt16, payload: ByteReader, state: inout TileState,

@@ -18,12 +18,13 @@ struct PGX {
         guard fields.count == 5 || fields.count == 6 else { throw Error.invalidHeader }
         let splitSign = fields.count == 6
         let signField = fields[2]
-        let bitField = splitSign ? fields[3] : fields[2].dropFirst()
+        let hasSign = signField.first == "+" || signField.first == "-"
+        let bitField = splitSign ? fields[3] : (hasSign ? fields[2].dropFirst() : fields[2][...])
         let widthField = splitSign ? fields[4] : fields[3]
         let heightField = splitSign ? fields[5] : fields[4]
         guard fields[0] == "PG", fields[1] == "ML" || fields[1] == "LM",
-              let sign = signField.first, sign == "+" || sign == "-",
-              splitSign ? signField.count == 1 : signField.count > 1,
+              !splitSign || (hasSign && signField.count == 1),
+              splitSign || !hasSign || signField.count > 1,
               let bits = Int(bitField), (1...32).contains(bits),
               let width = Int(widthField), width > 0,
               let height = Int(heightField), height > 0 else { throw Error.invalidHeader }
@@ -44,11 +45,11 @@ struct PGX {
             }
             let mask: UInt32 = bits == 32 ? UInt32.max : (UInt32(1) << bits) - 1
             value &= mask
-            if sign == "-", (value & (UInt32(1) << (bits - 1))) != 0 {
+            if signField.first == "-", (value & (UInt32(1) << (bits - 1))) != 0 {
                 value |= ~mask
             }
             samples.append(Int32(bitPattern: value))
         }
-        return PGX(width: width, height: height, bits: bits, signed: sign == "-", samples: samples)
+        return PGX(width: width, height: height, bits: bits, signed: signField.first == "-", samples: samples)
     }
 }
