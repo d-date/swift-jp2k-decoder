@@ -51,6 +51,9 @@ struct MainHeader: Sendable {
     var poc: [ProgressionChange]
     var ppm: [[UInt8]]
     var firstTilePartOffset: Int
+    /// End of the codestream within the input (the jp2c box end for JP2), so
+    /// boxes after the codestream are never parsed as tile-part data.
+    var codestreamEnd: Int
 }
 
 enum MainHeaderParser {
@@ -76,7 +79,8 @@ enum MainHeaderParser {
                 // conformance file g3), matching OpenJPEG's indexed merge.
                 let ppm = ppmParts.keys.sorted().compactMap { ppmParts[$0] }
                 return MainHeader(geometry: geometry, cod: cod, coc: coc, qcd: qcd, qcc: qcc,
-                                  rgn: rgn, poc: poc, ppm: ppm, firstTilePartOffset: markerOffset)
+                                  rgn: rgn, poc: poc, ppm: ppm, firstTilePartOffset: markerOffset,
+                                  codestreamEnd: range.upperBound)
             }
             if geometry == nil && marker != Marker.siz { throw .invalidCodestream(.missingSIZ) }
             if marker == 0xFF50 { throw .unsupported(.htj2k) }

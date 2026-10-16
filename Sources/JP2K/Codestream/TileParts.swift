@@ -71,7 +71,8 @@ enum TilePartParser {
         if tileCount > context.limits.maxTiles { throw .limitExceeded(.tiles) }
         try context.budget.reserve(bytes: try Checked.mul(tileCount, MemoryLayout<TileState?>.stride))
         var states = [TileState?](repeating: nil, count: tileCount)
-        var reader = ByteReader(bytes, range: header.firstTilePartOffset..<bytes.count,
+        let streamEnd = min(header.codestreamEnd, bytes.count)
+        var reader = ByteReader(bytes, range: header.firstTilePartOffset..<streamEnd,
                                 truncationError: .invalidCodestream(.truncated))
         var partCount = 0
         let ppmChunks = try mergePPM(header.ppm, context: &context)
@@ -111,10 +112,10 @@ enum TilePartParser {
             if declared != 0 { state.expectedParts = declared }
             let end: Int
             if psot == 0 {
-                end = bytes.count >= 2 && bytes.suffix(2).elementsEqual([0xFF, 0xD9]) ? bytes.count - 2 : bytes.count
+                end = streamEnd >= 2 && bytes[streamEnd - 2] == 0xFF && bytes[streamEnd - 1] == 0xD9 ? streamEnd - 2 : streamEnd
             } else {
                 end = try Checked.add(start, psot)
-                if end > bytes.count { throw .invalidCodestream(.badSOT) }
+                if end > streamEnd { throw .invalidCodestream(.badSOT) }
             }
             if end < reader.offset || end - reader.offset < 2 { throw .invalidCodestream(.badSOT) }
             while reader.offset < end {
@@ -145,14 +146,14 @@ enum TilePartParser {
             var bodyEnd = end
             if psot == 0 {
                 var position = reader.offset
-                let lastByte = try Checked.sub(bytes.count, 1)
+                let lastByte = try Checked.sub(streamEnd, 1)
                 while position < lastByte {
                     let next = try Checked.add(position, 1)
                     // SOP is FF91 Lsop(=4) Nsop; Nsop is a free 16-bit counter
                     // that may itself look like a marker, so step over it.
                     if bytes[position] == 0xFF && bytes[next] == 0x91 {
                         let sopEnd = try Checked.add(position, 6)
-                        if sopEnd > bytes.count { throw .invalidCodestream(.badTilePart) }
+                        if sopEnd > streamEnd { throw .invalidCodestream(.badTilePart) }
                         position = sopEnd
                         continue
                     }

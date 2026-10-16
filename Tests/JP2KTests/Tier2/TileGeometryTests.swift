@@ -99,7 +99,7 @@ private func builtGeometry(componentRect: [Int], tileOrigin: [Int], tileSize: [I
                           progression: .lrcp, layers: 1, mct: false, component: componentCoding)
     let qcd = QuantizationStyle(style: 1, guardBits: 2, stepSizes: [(exponent: 8, mantissa: 0)])
     let header = MainHeader(geometry: image, cod: cod, coc: [:], qcd: qcd, qcc: [:],
-                            rgn: [:], poc: [], ppm: [], firstTilePartOffset: 0)
+                            rgn: [:], poc: [], ppm: [], firstTilePartOffset: 0, codestreamEnd: 0)
     let tile = TileData(index: 0, parameters: TileCodingParameters(cod: cod, coc: [:], qcd: qcd,
                                                                     qcc: [:], rgn: [:], poc: []),
                         body: [], packedPacketHeaders: nil, tilePartCount: 1)
