@@ -128,6 +128,9 @@ enum TilePartParser {
                 let allowed: [UInt16] = [Marker.cod, Marker.coc, Marker.qcd, Marker.qcc, Marker.rgn,
                                          Marker.poc, 0xFF61, 0xFF58, Marker.com]
                 if !allowed.contains(code) { throw .invalidCodestream(.badMarker) }
+                // ISO/IEC 15444-1 Table A.2 allows COD/COC/QCD/QCC/RGN only in
+                // the first tile-part header of a tile (OpenJPEG tolerates them
+                // later; strict mode rejects).
                 if ordinal != 0 && [Marker.cod, Marker.coc, Marker.qcd, Marker.qcc, Marker.rgn].contains(code) {
                     throw .invalidCodestream(.unexpectedMarker)
                 }

@@ -10,7 +10,7 @@ enum BMPWriter {
         return size
     }
 
-    static func write(_ image: borrowing PixelImage, maxMemoryBytes: Int) throws(JP2KError) -> [UInt8] {
+    static func write(_ image: PixelImage, maxMemoryBytes: Int) throws(JP2KError) -> [UInt8] {
         let size = try fileSize(width: image.width, height: image.height)
         var budget = MemoryBudget(limit: maxMemoryBytes)
         try budget.reserve(bytes: image.pixels.count)

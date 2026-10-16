@@ -140,7 +140,7 @@ PixelFormat.grayAlpha8 | case grayAlpha8
 PixelFormat.rgb8 | case rgb8
 PixelFormat.rgba8 | case rgba8
 PixelImage | struct PixelImage
-PixelImage.bmp() | borrowing func bmp() throws(JP2KError) -> [UInt8]
+PixelImage.bmp() | func bmp() throws(JP2KError) -> [UInt8]
 PixelImage.colorWasInferred | let colorWasInferred: Bool
 PixelImage.format | let format: PixelFormat
 PixelImage.height | let height: Int

@@ -57,6 +57,8 @@ let crop = try decoder.decodePixels(rawBytes, color: .assume(.gray8),
 
 Verify the source of the data before decoding when you can. The decoder validates JP2 boxes and codestream markers against format rules and configured limits, then continues checking bounds and arithmetic during decoding. Within the configured limits, malformed input should return `JP2KError` rather than trap. Large allocations are checked against the memory budget before allocation. Exhaustion of the host's actual memory is not covered by this guarantee.
 
+`readInfo` already charges the decoded component planes to `maxMemoryBytes`, so an image that could not be decoded within the budget is rejected before any decoding work. As OpenJPEG does, a codestream that ends exactly after its last tile-part without an EOC marker is accepted; any other truncation is an error.
+
 The package targets Windows x64 and ARM64, Linux, Android, macOS, and iOS. CI tests Linux, Windows x64 and ARM64, and an Android emulator, and checks lint and the public API listing. Apple platforms are verified locally; CI has no macOS runner.
 
 ## Performance

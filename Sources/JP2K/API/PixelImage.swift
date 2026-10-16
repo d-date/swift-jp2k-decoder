@@ -1,5 +1,5 @@
 /// An eight-bit interleaved image with no row padding.
-public struct PixelImage: ~Copyable, Sendable {
+public struct PixelImage: Sendable {
     public let width: Int
     public let height: Int
     public let format: PixelFormat
@@ -18,7 +18,7 @@ public struct PixelImage: ~Copyable, Sendable {
     }
 
     /// Writes a top-down 32-bit BGRA BMP. File-size overflow is a memory-limit error.
-    public borrowing func bmp() throws(JP2KError) -> [UInt8] {
+    public func bmp() throws(JP2KError) -> [UInt8] {
         try BMPWriter.write(self, maxMemoryBytes: maxMemoryBytes)
     }
 }

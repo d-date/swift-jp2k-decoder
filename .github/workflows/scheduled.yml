@@ -1,6 +1,6 @@
 name: Extended checks
-# Manual only (private repository). The fuzz harness and benchmark body are
-# added by later work; until then these jobs are expected to fail or no-op.
+# Manual only (private repository): long fuzz run, exhaustive corrupt-input
+# sweep and the release benchmark.
 on:
   workflow_dispatch:
 
