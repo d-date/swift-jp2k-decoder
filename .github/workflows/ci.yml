@@ -126,7 +126,10 @@ jobs:
       SWIFT_ANDROID_SDK_URL: https://download.swift.org/swift-6.4.1-release/android-sdk/swift-6.4.1-RELEASE/swift-6.4.1-RELEASE_android.artifactbundle.tar.gz
       SWIFT_ANDROID_SDK_CHECKSUM: a356b79f8f1daa6ae3a66f4c556966ca20c0208b3659805cf30a83a0a31d6772
       SWIFT_ANDROID_SDK_ID: swift-6.4.1-RELEASE_android
-      ANDROID_NDK_HOME: ${{ github.workspace }}/../android-ndk-r30
+      # Absolute path (cache paths with '..' are unreliable); SwiftPM looks at
+      # ANDROID_NDK_ROOT, android-test.sh at ANDROID_NDK_HOME.
+      ANDROID_NDK_HOME: /home/runner/android-ndk-r30
+      ANDROID_NDK_ROOT: /home/runner/android-ndk-r30
       AVD_IMAGE: system-images;android-35;google_apis;x86_64
     steps:
       # The Swift toolchain, Swift Android SDK, NDK and emulator image do not
@@ -146,7 +149,7 @@ jobs:
             ~/.local/share/swiftly
             ~/.swiftpm/swift-sdks
             ${{ env.ANDROID_NDK_HOME }}
-          key: android-toolchains-swift-6.4.1-ndk-r30
+          key: android-toolchains-swift-6.4.1-ndk-r30-v2
       - uses: actions/cache@v4
         with:
           path: |
