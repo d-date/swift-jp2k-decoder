@@ -15,7 +15,15 @@ jobs:
     container: swift:6.4-noble
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: .conformance-data
+          key: openjpeg-data-39524bd3a601d90ed8e0177559400d23945f96a9
+      - name: Fetch conformance data
+        run: bash Scripts/fetch-conformance.sh .conformance-data
       - name: Long fuzz run
+        env:
+          JP2K_CONFORMANCE_DIR: ${{ github.workspace }}/.conformance-data
         run: |
           bash Fuzz/build.sh
           bash Fuzz/run.sh 14400

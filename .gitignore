@@ -4,3 +4,7 @@
 .DS_Store
 Fuzz/artifacts/
 .conformance-data/
+Fuzz/.build/
+Fuzz/corpus/
+Fuzz/fuzz.log
+Fuzz/*.log
