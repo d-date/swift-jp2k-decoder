@@ -44,7 +44,9 @@ for root in "${sdk_roots[@]}"; do
     fi
 done
 if [[ -z "$sdk_bundle" ]]; then
-    sdk_bundle=$(find "$HOME/.local/share" -maxdepth 5 -type d -name "$sdk_id.artifactbundle" -print -quit 2>/dev/null || true)
+    # The install location differs by toolchain manager and platform
+    # (e.g. swiftly on Linux); search the home directory as a last resort.
+    sdk_bundle=$(find "$HOME" -maxdepth 7 -type d -name "$sdk_id.artifactbundle" -print -quit 2>/dev/null || true)
 fi
 if [[ -z "$sdk_bundle" ]]; then
     echo "Cannot find the installed SDK bundle for $sdk_id; set SWIFT_SDKS_DIR" >&2
