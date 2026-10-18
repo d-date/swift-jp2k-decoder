@@ -32,7 +32,9 @@ The rows below map ported Swift symbols to the OpenJPEG v2.5.4 reference source.
 | Sources/JP2K/Tier2/PacketIterator.swift | PacketIterator.positions | src/lib/openjp2/pi.c | opj_pi_create_decode, opj_get_all_encoding_parameters, opj_pi_update_decode_poc, opj_pi_update_decode_not_poc |
 | Sources/JP2K/Tier2/PacketIterator.swift | PacketState.walk, PacketState.walkSpatial | src/lib/openjp2/pi.c | opj_pi_next, opj_pi_next_lrcp, opj_pi_next_rlcp, opj_pi_next_rpcl, opj_pi_next_pcrl, opj_pi_next_cprl |
 | Sources/JP2K/IO/PacketBitReader.swift | PacketBitReader.read, PacketBitReader.alignAndFinish | src/lib/openjp2/bio.c | opj_bio_read, opj_bio_inalign, opj_bio_numbytes |
-| Sources/JP2K/Tier2/PacketDecoder.swift | PacketDecoder.decodeTile | src/lib/openjp2/t2.c | opj_t2_decode_packets, opj_t2_decode_packet, opj_t2_read_packet_header, opj_t2_read_packet_data, opj_t2_init_seg |
+| Sources/JP2K/Tier2/PacketDecoder.swift | PacketDecoder.decodeTile, PacketDecoder.validate, PacketDecoder.reset | src/lib/openjp2/t2.c | opj_t2_decode_packets, opj_t2_decode_packet, opj_t2_read_packet_header |
+| Sources/JP2K/Tier2/PacketDecoder.swift | PacketDecoder.readHeader, PacketDecoder.readPasses, PacketDecoder.maxPasses | src/lib/openjp2/t2.c | opj_t2_read_packet_header, opj_t2_init_seg |
+| Sources/JP2K/Tier2/PacketDecoder.swift | PacketDecoder.readBody | src/lib/openjp2/t2.c | opj_t2_read_packet_data |
 | Sources/JP2K/Tier2/PacketDecoder.swift | PacketDecoder.commaCode, PacketDecoder.numberOfPasses | src/lib/openjp2/t2.c | opj_t2_getcommacode, opj_t2_getnumpasses |
 | Sources/JP2K/Tier2/TileGeometry.swift | CodeBlockPacketSegment, CodeBlockSegment | src/lib/openjp2/t2.c | opj_t2_read_packet_header, opj_t2_read_packet_data |
 | Sources/JP2K/Tier1/MQDecoder.swift | MQDecoder | src/lib/openjp2/mqc.c, src/lib/openjp2/mqc_inl.h | opj_mqc_init_dec, opj_mqc_raw_init_dec, opj_mqc_resetstates, opj_mqc_setstate, opj_mqc_bytein, opj_mqc_decode, opj_mqc_raw_decode |

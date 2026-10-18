@@ -72,16 +72,8 @@ enum PacketDecoder {
         var headerOffset = 0
         let packed = tile.packedPacketHeaders
         for position in positions {
-            if position.component < 0 || position.component >= geometry.components.count ||
-                position.resolution < 0 || position.resolution >= geometry.components[position.component].resolutions.count {
-                throw .invalidCodestream(.badPacketHeader)
-            }
-            let precinctsWide = geometry.components[position.component].resolutions[position.resolution].precinctsWide
-            let precinctsHigh = geometry.components[position.component].resolutions[position.resolution].precinctsHigh
-            let precinctCount = try Checked.mul(precinctsWide, precinctsHigh)
-            if position.precinct < 0 || position.precinct >= precinctCount {
-                throw .invalidCodestream(.badPacketHeader)
-            }
+            try validate(position, in: geometry)
+            let (c, r, p) = (position.component, position.resolution, position.precinct)
             if tile.parameters.cod.usesSOP && bodyOffset <= tile.body.count - 6 &&
                 tile.body[bodyOffset] == 0xFF && tile.body[bodyOffset + 1] == 0x91 {
                 bodyOffset = try Checked.add(bodyOffset, 6)
@@ -91,101 +83,17 @@ enum PacketDecoder {
             if start < 0 || start >= headerBytes.count { throw .invalidCodestream(.badPacketHeader) }
             var bits = PacketBitReader(headerBytes, range: start..<headerBytes.count)
             let present = try bits.read(bits: 1) == 1
-            let coding = tile.parameters.coc[position.component] ?? tile.parameters.cod.component
+            let style = (tile.parameters.coc[c] ?? tile.parameters.cod.component).codeBlockStyle
+            // Precincts are mutated in place through the geometry so no
+            // code-block or tag-tree storage is ever copied.
+            let bands = geometry.components[c].resolutions[r].bands.indices
             if position.layer == 0 {
-                for bandIndex in geometry.components[position.component].resolutions[position.resolution].bands.indices {
-                    let transient = try precinctCopyBytes(
-                        geometry.components[position.component].resolutions[position.resolution]
-                            .bands[bandIndex].precincts[position.precinct])
-                    try context.budget.reserve(bytes: transient)
-                    var blocks: [CodeBlock] = []
-                    swap(&blocks, &geometry.components[position.component].resolutions[position.resolution]
-                        .bands[bandIndex].precincts[position.precinct].codeBlocks)
-                    var precinct = geometry.components[position.component].resolutions[position.resolution]
-                        .bands[bandIndex].precincts[position.precinct]
-                    swap(&blocks, &precinct.codeBlocks)
-                    precinct.inclusionTree.reset()
-                    precinct.zeroBitPlaneTree.reset()
-                    for blockIndex in precinct.codeBlocks.indices {
-                        precinct.codeBlocks[blockIndex].segments.removeAll(keepingCapacity: true)
-                        precinct.codeBlocks[blockIndex].included = false
-                        precinct.codeBlocks[blockIndex].totalPasses = 0
-                        precinct.codeBlocks[blockIndex].packetSegments.removeAll(keepingCapacity: true)
-                    }
-                    geometry.components[position.component].resolutions[position.resolution].bands[bandIndex].precincts[position.precinct] = precinct
-                    context.budget.release(bytes: transient)
-                }
+                for band in bands { reset(&geometry.components[c].resolutions[r].bands[band].precincts[p]) }
             }
             if present {
-                for bandIndex in geometry.components[position.component].resolutions[position.resolution].bands.indices {
-                    let bandX0 = geometry.components[position.component].resolutions[position.resolution].bands[bandIndex].x0
-                    let bandX1 = geometry.components[position.component].resolutions[position.resolution].bands[bandIndex].x1
-                    let bandY0 = geometry.components[position.component].resolutions[position.resolution].bands[bandIndex].y0
-                    let bandY1 = geometry.components[position.component].resolutions[position.resolution].bands[bandIndex].y1
-                    if bandX0 >= bandX1 || bandY0 >= bandY1 { continue }
-                    let treeBytes = try Checked.add(
-                        geometry.components[position.component].resolutions[position.resolution]
-                            .bands[bandIndex].precincts[position.precinct].inclusionTree.storageBytes(),
-                        geometry.components[position.component].resolutions[position.resolution]
-                            .bands[bandIndex].precincts[position.precinct].zeroBitPlaneTree.storageBytes())
-                    try context.budget.reserve(bytes: treeBytes)
-                    var blocks: [CodeBlock] = []
-                    swap(&blocks, &geometry.components[position.component].resolutions[position.resolution]
-                        .bands[bandIndex].precincts[position.precinct].codeBlocks)
-                    var precinct = geometry.components[position.component].resolutions[position.resolution]
-                        .bands[bandIndex].precincts[position.precinct]
-                    swap(&blocks, &precinct.codeBlocks)
-                    for blockIndex in precinct.codeBlocks.indices {
-                        let included: Bool
-                        if precinct.codeBlocks[blockIndex].segments.isEmpty {
-                            included = try precinct.inclusionTree.decode(&bits, leaf: blockIndex,
-                                                                          threshold: Checked.add(position.layer, 1))
-                        } else { included = try bits.read(bits: 1) == 1 }
-                        if !included { continue }
-                        if precinct.codeBlocks[blockIndex].segments.isEmpty {
-                            var zero = 0
-                            while !((try precinct.zeroBitPlaneTree.decode(&bits, leaf: blockIndex, threshold: zero))) {
-                                zero = try Checked.add(zero, 1)
-                                if zero > 109 { throw .invalidCodestream(.badPacketHeader) }
-                            }
-                            precinct.codeBlocks[blockIndex].zeroBitPlanes = zero
-                            precinct.codeBlocks[blockIndex].numLenBits = 3
-                            precinct.codeBlocks[blockIndex].included = true
-                        }
-                        let passes = try numberOfPasses(&bits)
-                        let newTotal = try Checked.add(precinct.codeBlocks[blockIndex].totalPasses, passes)
-                        // ROI can make the zero-bitplane count exceed the band's nominal bitplanes.
-                        // OpenJPEG accepts those packets; the fixed Part 1 pass ceiling still applies.
-                        if newTotal > 109 { throw .invalidCodestream(.badPacketHeader) }
-                        try context.countCodingPasses(passes)
-                        let increment = try commaCode(&bits)
-                        precinct.codeBlocks[blockIndex].numLenBits = try Checked.add(precinct.codeBlocks[blockIndex].numLenBits, increment)
-                        if precinct.codeBlocks[blockIndex].numLenBits > 32 { throw .invalidCodestream(.badPacketHeader) }
-                        var remaining = passes
-                        while remaining > 0 {
-                            let index: Int
-                            if let last = precinct.codeBlocks[blockIndex].segments.indices.last,
-                               precinct.codeBlocks[blockIndex].segments[last].passes + precinct.codeBlocks[blockIndex].segments[last].pendingPasses < precinct.codeBlocks[blockIndex].segments[last].maxPasses {
-                                index = last
-                            } else {
-                                index = precinct.codeBlocks[blockIndex].segments.count
-                                if index >= 109 { throw .invalidCodestream(.badPacketHeader) }
-                                try context.budget.append(CodeBlockSegment(maxPasses: maxPasses(style: coding.codeBlockStyle,
-                                                                                          previous: precinct.codeBlocks[blockIndex].segments.last?.maxPasses)),
-                                                          to: &precinct.codeBlocks[blockIndex].segments)
-                            }
-                            let available = try Checked.sub(precinct.codeBlocks[blockIndex].segments[index].maxPasses,
-                                                            Checked.add(precinct.codeBlocks[blockIndex].segments[index].passes, precinct.codeBlocks[blockIndex].segments[index].pendingPasses))
-                            if available < 1 { throw .invalidCodestream(.badPacketHeader) }
-                            let segmentPasses = min(remaining, available)
-                            let width = try segmentLengthBitCount(precinct.codeBlocks[blockIndex].numLenBits, passes: segmentPasses)
-                            precinct.codeBlocks[blockIndex].segments[index].pendingPasses = segmentPasses
-                            precinct.codeBlocks[blockIndex].segments[index].pendingLength = try bits.read(bits: width)
-                            remaining = try Checked.sub(remaining, segmentPasses)
-                        }
-                    }
-                    geometry.components[position.component].resolutions[position.resolution].bands[bandIndex].precincts[position.precinct] = precinct
-                    context.budget.release(bytes: treeBytes)
+                for band in bands where geometry.components[c].resolutions[r].bands[band].hasArea {
+                    try readHeader(&geometry.components[c].resolutions[r].bands[band].precincts[p],
+                                   layer: position.layer, codeBlockStyle: style, bits: &bits, context: &context)
                 }
             }
             let consumed = try bits.alignAndFinish()
@@ -198,53 +106,130 @@ enum PacketDecoder {
             }
             if packed == nil { bodyOffset = afterHeader } else { headerOffset = afterHeader }
             if !present { continue }
-            for bandIndex in geometry.components[position.component].resolutions[position.resolution].bands.indices {
-                let bandX0 = geometry.components[position.component].resolutions[position.resolution].bands[bandIndex].x0
-                let bandX1 = geometry.components[position.component].resolutions[position.resolution].bands[bandIndex].x1
-                let bandY0 = geometry.components[position.component].resolutions[position.resolution].bands[bandIndex].y0
-                let bandY1 = geometry.components[position.component].resolutions[position.resolution].bands[bandIndex].y1
-                if bandX0 >= bandX1 || bandY0 >= bandY1 { continue }
-                var blocks: [CodeBlock] = []
-                swap(&blocks, &geometry.components[position.component].resolutions[position.resolution]
-                    .bands[bandIndex].precincts[position.precinct].codeBlocks)
-                var precinct = geometry.components[position.component].resolutions[position.resolution]
-                    .bands[bandIndex].precincts[position.precinct]
-                swap(&blocks, &precinct.codeBlocks)
-                for blockIndex in precinct.codeBlocks.indices {
-                    for segmentIndex in precinct.codeBlocks[blockIndex].segments.indices where precinct.codeBlocks[blockIndex].segments[segmentIndex].pendingPasses > 0 {
-                        let length = precinct.codeBlocks[blockIndex].segments[segmentIndex].pendingLength
-                        if length < 0 || bodyOffset > tile.body.count || length > tile.body.count - bodyOffset {
-                            throw .invalidCodestream(.badPacketHeader)
-                        }
-                        let dataEnd = try Checked.add(bodyOffset, length)
-                        try context.budget.append(contentsOf: tile.body[bodyOffset..<dataEnd],
-                                                  to: &precinct.codeBlocks[blockIndex].data)
-                        bodyOffset = try Checked.add(bodyOffset, length)
-                        try context.budget.append(CodeBlockPacketSegment(layer: position.layer,
-                                                                           passes: precinct.codeBlocks[blockIndex].segments[segmentIndex].pendingPasses,
-                                                                           length: length),
-                                                  to: &precinct.codeBlocks[blockIndex].packetSegments)
-                        precinct.codeBlocks[blockIndex].segments[segmentIndex].length = try Checked.add(precinct.codeBlocks[blockIndex].segments[segmentIndex].length, length)
-                        precinct.codeBlocks[blockIndex].segments[segmentIndex].dataLength = try Checked.add(precinct.codeBlocks[blockIndex].segments[segmentIndex].dataLength, length)
-                        precinct.codeBlocks[blockIndex].totalPasses = try Checked.add(precinct.codeBlocks[blockIndex].totalPasses, precinct.codeBlocks[blockIndex].segments[segmentIndex].pendingPasses)
-                        precinct.codeBlocks[blockIndex].segments[segmentIndex].passes = try Checked.add(precinct.codeBlocks[blockIndex].segments[segmentIndex].passes,
-                                                                              precinct.codeBlocks[blockIndex].segments[segmentIndex].pendingPasses)
-                        precinct.codeBlocks[blockIndex].segments[segmentIndex].pendingPasses = 0
-                        precinct.codeBlocks[blockIndex].segments[segmentIndex].pendingLength = 0
-                    }
+            for band in bands where geometry.components[c].resolutions[r].bands[band].hasArea {
+                for block in geometry.components[c].resolutions[r].bands[band].precincts[p].codeBlocks.indices {
+                    try readBody(&geometry.components[c].resolutions[r].bands[band].precincts[p].codeBlocks[block],
+                                 layer: position.layer, body: tile.body, offset: &bodyOffset,
+                                 budget: &context.budget)
                 }
-                geometry.components[position.component].resolutions[position.resolution].bands[bandIndex].precincts[position.precinct] = precinct
             }
         }
         if bodyOffset != tile.body.count { throw .invalidCodestream(.badPacketHeader) }
         if let packed, headerOffset != packed.count { throw .invalidCodestream(.badPacketHeader) }
     }
 
-    private static func precinctCopyBytes(_ precinct: Precinct) throws(JP2KError) -> Int {
-        let blocks = try Checked.mul(precinct.codeBlocks.count, MemoryLayout<CodeBlock>.stride)
-        let inclusion = try precinct.inclusionTree.storageBytes()
-        let zero = try precinct.zeroBitPlaneTree.storageBytes()
-        return try Checked.add(blocks, Checked.add(inclusion, zero))
+    private static func validate(_ position: PacketPosition, in geometry: borrowing TileGeometry) throws(JP2KError) {
+        guard geometry.components.indices.contains(position.component),
+              geometry.components[position.component].resolutions.indices.contains(position.resolution) else {
+            throw .invalidCodestream(.badPacketHeader)
+        }
+        let precinctCount = try Checked.mul(
+            geometry.components[position.component].resolutions[position.resolution].precinctsWide,
+            geometry.components[position.component].resolutions[position.resolution].precinctsHigh)
+        if position.precinct < 0 || position.precinct >= precinctCount {
+            throw .invalidCodestream(.badPacketHeader)
+        }
+    }
+
+    /// Clears what earlier tiles' packets left behind before layer 0.
+    private static func reset(_ precinct: inout Precinct) {
+        precinct.inclusionTree.reset()
+        precinct.zeroBitPlaneTree.reset()
+        for index in precinct.codeBlocks.indices {
+            precinct.codeBlocks[index].segments.removeAll(keepingCapacity: true)
+            precinct.codeBlocks[index].included = false
+            precinct.codeBlocks[index].totalPasses = 0
+            precinct.codeBlocks[index].packetSegments.removeAll(keepingCapacity: true)
+        }
+    }
+
+    /// Reads one band's share of a packet header: inclusion, zero bitplanes,
+    /// pass counts and segment lengths for every code-block of the precinct.
+    private static func readHeader(_ precinct: inout Precinct, layer: Int, codeBlockStyle: UInt8,
+                                   bits: inout PacketBitReader, context: inout DecodeContext) throws(JP2KError) {
+        for index in precinct.codeBlocks.indices {
+            let firstInclusion = precinct.codeBlocks[index].segments.isEmpty
+            let included: Bool
+            if firstInclusion {
+                included = try precinct.inclusionTree.decode(&bits, leaf: index, threshold: Checked.add(layer, 1))
+            } else {
+                included = try bits.read(bits: 1) == 1
+            }
+            if !included { continue }
+            if firstInclusion {
+                var zero = 0
+                while !(try precinct.zeroBitPlaneTree.decode(&bits, leaf: index, threshold: zero)) {
+                    zero = try Checked.add(zero, 1)
+                    if zero > 109 { throw .invalidCodestream(.badPacketHeader) }
+                }
+                precinct.codeBlocks[index].zeroBitPlanes = zero
+                precinct.codeBlocks[index].numLenBits = 3
+                precinct.codeBlocks[index].included = true
+            }
+            try readPasses(&precinct.codeBlocks[index], codeBlockStyle: codeBlockStyle,
+                           bits: &bits, context: &context)
+        }
+    }
+
+    /// Reads the new pass count and the length of each segment those passes
+    /// fall into, opening segments as the code-block style requires.
+    private static func readPasses(_ block: inout CodeBlock, codeBlockStyle: UInt8,
+                                   bits: inout PacketBitReader, context: inout DecodeContext) throws(JP2KError) {
+        let passes = try numberOfPasses(&bits)
+        let newTotal = try Checked.add(block.totalPasses, passes)
+        // ROI can make the zero-bitplane count exceed the band's nominal bitplanes.
+        // OpenJPEG accepts those packets; the fixed Part 1 pass ceiling still applies.
+        if newTotal > 109 { throw .invalidCodestream(.badPacketHeader) }
+        try context.countCodingPasses(passes)
+        let increment = try commaCode(&bits)
+        block.numLenBits = try Checked.add(block.numLenBits, increment)
+        if block.numLenBits > 32 { throw .invalidCodestream(.badPacketHeader) }
+        var remaining = passes
+        while remaining > 0 {
+            let index: Int
+            if let last = block.segments.indices.last,
+               block.segments[last].passes + block.segments[last].pendingPasses < block.segments[last].maxPasses {
+                index = last
+            } else {
+                index = block.segments.count
+                if index >= 109 { throw .invalidCodestream(.badPacketHeader) }
+                let segment = CodeBlockSegment(maxPasses: maxPasses(style: codeBlockStyle,
+                                                                    previous: block.segments.last?.maxPasses))
+                try context.budget.append(segment, to: &block.segments)
+            }
+            let segment = block.segments[index]
+            let available = try Checked.sub(segment.maxPasses, Checked.add(segment.passes, segment.pendingPasses))
+            if available < 1 { throw .invalidCodestream(.badPacketHeader) }
+            let segmentPasses = min(remaining, available)
+            let width = try segmentLengthBitCount(block.numLenBits, passes: segmentPasses)
+            block.segments[index].pendingPasses = segmentPasses
+            block.segments[index].pendingLength = try bits.read(bits: width)
+            remaining = try Checked.sub(remaining, segmentPasses)
+        }
+    }
+
+    /// Moves the bytes announced by the packet header from the body into
+    /// the code-block and commits the pending passes.
+    private static func readBody(_ block: inout CodeBlock, layer: Int, body: [UInt8], offset: inout Int,
+                                 budget: inout MemoryBudget) throws(JP2KError) {
+        for index in block.segments.indices where block.segments[index].pendingPasses > 0 {
+            let segment = block.segments[index]
+            let length = segment.pendingLength
+            if length < 0 || offset > body.count || length > body.count - offset {
+                throw .invalidCodestream(.badPacketHeader)
+            }
+            let end = try Checked.add(offset, length)
+            try budget.append(contentsOf: body[offset..<end], to: &block.data)
+            offset = end
+            try budget.append(CodeBlockPacketSegment(layer: layer, passes: segment.pendingPasses, length: length),
+                              to: &block.packetSegments)
+            block.segments[index].length = try Checked.add(segment.length, length)
+            block.segments[index].dataLength = try Checked.add(segment.dataLength, length)
+            block.totalPasses = try Checked.add(block.totalPasses, segment.pendingPasses)
+            block.segments[index].passes = try Checked.add(segment.passes, segment.pendingPasses)
+            block.segments[index].pendingPasses = 0
+            block.segments[index].pendingLength = 0
+        }
     }
 
     private static func maxPasses(style: UInt8, previous: Int?) -> Int {
@@ -255,4 +240,8 @@ enum PacketDecoder {
         }
         return 109
     }
+}
+
+private extension Band {
+    var hasArea: Bool { x0 < x1 && y0 < y1 }
 }

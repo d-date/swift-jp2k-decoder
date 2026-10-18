@@ -137,7 +137,7 @@ enum ColorConverter {
                                         palette: palette, referenceOrigin: referenceOrigin)
                 let cr = try syccChroma(order[2], luma: order[0], atX: x, y: y, image: image, mapping: mapping,
                                         palette: palette, referenceOrigin: referenceOrigin)
-                let depth = try depthOf(order[0], image: image, mapping: mapping, palette: palette)
+                let depth = try channelFormat(order[0], image: image, mapping: mapping, palette: palette).precision
                 let rgb = syccToRGB(yValue.0, cb.0, cr.0, depth: depth)
                 pixels[base] = scale(rgb.0, precision: depth, signed: false)
                 pixels[base + 1] = scale(rgb.1, precision: depth, signed: false)
@@ -183,7 +183,8 @@ enum ColorConverter {
             } else {
                 self.palette = nil
             }
-            scale = try channelScale(channel, image: image, mapping: mapping, palette: palette)
+            let format = try channelFormat(channel, image: image, mapping: mapping, palette: palette)
+            scale = ChannelScale(precision: format.precision, signed: format.signed)
             var columns = try budget.array(repeating: 0, count: crop.2)
             var rows: [Int]
             do {
@@ -236,18 +237,19 @@ enum ColorConverter {
         }
     }
 
-    private static func channelScale(_ channel: Int, image: ComponentImage,
-                                     mapping: [ComponentMapping]?, palette: PaletteBox?)
-        throws(JP2KError) -> ChannelScale {
+    /// Precision and signedness of output channel `channel`: the palette's
+    /// when cmap routes the channel through pclr, else its source component's.
+    private static func channelFormat(_ channel: Int, image: ComponentImage, mapping: [ComponentMapping]?,
+                                      palette: PaletteBox?) throws(JP2KError) -> (precision: Int, signed: Bool) {
         let source = try sourceComponent(channel, mapping: mapping)
         guard image.info.components.indices.contains(source) else {
             throw .invalidContainer(.badComponentMapping)
         }
         if let mapping, let palette, channel < mapping.count {
-            return ChannelScale(precision: palette.bitDepths[channel], signed: palette.signed[channel])
+            return (palette.bitDepths[channel], palette.signed[channel])
         }
         let descriptor = image.info.components[source]
-        return ChannelScale(precision: descriptor.precision, signed: descriptor.isSigned)
+        return (descriptor.precision, descriptor.isSigned)
     }
 
     private static func checkMapping(_ mapping: [ComponentMapping], palette: PaletteBox,
@@ -286,16 +288,6 @@ enum ColorConverter {
         context.budget.release(bytes: try Checked.mul(channels.count, MemoryLayout<Int>.stride))
     }
 
-    private static func depthOf(_ channel: Int, image: ComponentImage, mapping: [ComponentMapping]?,
-                                palette: PaletteBox?) throws(JP2KError) -> Int {
-        if let mapping, let palette, channel < mapping.count {
-            return palette.bitDepths[channel]
-        }
-        let source = try sourceComponent(channel, mapping: mapping)
-        if source >= image.info.components.count { throw .invalidContainer(.badComponentMapping) }
-        return image.info.components[source].precision
-    }
-
     private static func channelValue(_ channel: Int, atX x: Int, y: Int, image: ComponentImage,
                                      mapping: [ComponentMapping]?, palette: PaletteBox?,
                                      referenceOrigin: (Int, Int),
@@ -319,18 +311,15 @@ enum ColorConverter {
         }
         let index = try Checked.add(try Checked.mul(row, descriptor.width), column)
         if index >= image.components[source].count { throw .invalidCodestream(.badSIZ) }
-        let value = Int(image.components[source][index])
+        var value = Int(image.components[source][index])
         if let mapping, let palette, mapping[channel].mtyp == 1 {
             if channel >= palette.entries.count || palette.entries[channel].isEmpty {
                 throw .invalidContainer(.badPalette)
             }
-            let paletteIndex = min(max(0, value), palette.entries[channel].count - 1)
-            return (Int(palette.entries[channel][paletteIndex]), palette.bitDepths[channel], palette.signed[channel])
+            value = Int(palette.entries[channel][min(max(0, value), palette.entries[channel].count - 1)])
         }
-        if let mapping, let palette, channel < mapping.count {
-            return (value, palette.bitDepths[channel], palette.signed[channel])
-        }
-        return (value, descriptor.precision, descriptor.isSigned)
+        let format = try channelFormat(channel, image: image, mapping: mapping, palette: palette)
+        return (value, format.precision, format.signed)
     }
 
     /// Codestream component feeding output channel `channel` (through cmap

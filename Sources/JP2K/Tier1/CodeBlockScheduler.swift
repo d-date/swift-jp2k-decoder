@@ -159,13 +159,18 @@ enum CodeBlockScheduler {
         var row = try firstTarget(job, in: geometry)
         for _ in 0..<job.height {
             for x in 0..<job.width {
-                geometry.components[job.component].coefficients[row + x] = Dequantize.sample(
-                    decoder.output(at: source), roiShift: job.roiShift, reversible: job.reversible,
-                    stepSize: job.stepSize)
+                geometry.components[job.component].coefficients[row + x] = coefficient(job, decoder, source)
                 source += 1
             }
             row += job.rowStride
         }
+    }
+
+    @inline(__always)
+    private static func coefficient(_ job: CodeBlockJob, _ decoder: borrowing CodeBlockDecoder,
+                                    _ index: Int) -> Int32 {
+        Dequantize.sample(decoder.output(at: index), roiShift: job.roiShift, reversible: job.reversible,
+                          stepSize: job.stepSize)
     }
 
     // MARK: - Parallel path
@@ -278,11 +283,7 @@ enum CodeBlockScheduler {
                     var values = [Int32](repeating: 0, count: count)
                     let actual = try Checked.mul(values.capacity, MemoryLayout<Int32>.stride)
                     if actual > requested { try shared.reserve(bytes: actual - requested) }
-                    for sample in values.indices {
-                        values[sample] = Dequantize.sample(
-                            decoder.output(at: sample), roiShift: job.roiShift,
-                            reversible: job.reversible, stepSize: job.stepSize)
-                    }
+                    for sample in values.indices { values[sample] = coefficient(job, decoder, sample) }
                     let index = claimed
                     results.withLock { $0.outputs[index] = values }
                 }
@@ -313,14 +314,13 @@ enum CodeBlockScheduler {
             guard values.count == (try Checked.mul(job.width, job.height)) else {
                 throw .invalidCodestream(.badCodeBlock)
             }
-            var source = 0
             var row = try firstTarget(job, in: geometry)
-            for _ in 0..<job.height {
-                for x in 0..<job.width {
-                    geometry.components[job.component].coefficients[row + x] = values[source]
-                    source += 1
-                }
-                row += job.rowStride
+            for source in stride(from: 0, to: values.count, by: max(job.width, 1)) {
+                let rowEnd = try Checked.add(row, job.width)
+                let sourceEnd = try Checked.add(source, job.width)
+                geometry.components[job.component].coefficients
+                    .replaceSubrange(row..<rowEnd, with: values[source..<sourceEnd])
+                row = try Checked.add(row, job.rowStride)
             }
         }
         context.countParallelRun()
