@@ -51,8 +51,13 @@ struct DecodePixelsTests {
         let bytes = try fixture("subsampled-4x.j2k")
         let minimum = try await minimumMemory(for: bytes, color: .assume(.gray8))
         var limits = Limits()
-        limits.maxMemoryBytes = minimum
+        // glibc's allocation rounding varies from run to run, so the exact
+        // minimum can fail on a second decode; a small margin keeps the limit
+        // well short of what the pixels plus the BMP need.
+        limits.maxMemoryBytes = minimum + 1_024
         let image = try await JP2KDecoder(limits: limits).decodePixels(bytes, color: .assume(.gray8))
+        let bmpBytes = 54 + image.width * image.height * 4
+        try #require(image.pixels.count + bmpBytes > limits.maxMemoryBytes)
         #expect(throws: JP2KError.limitExceeded(.memory)) { _ = try image.bmp() }
     }
 
