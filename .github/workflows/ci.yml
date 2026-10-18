@@ -145,11 +145,14 @@ jobs:
       - uses: actions/cache@v4
         id: toolchains
         with:
+          # `swift sdk install` writes to ~/.config/swiftpm (XDG) on this
+          # runner; older SwiftPM used ~/.swiftpm. Cache both.
           path: |
             ~/.local/share/swiftly
+            ~/.config/swiftpm/swift-sdks
             ~/.swiftpm/swift-sdks
             ${{ env.ANDROID_NDK_HOME }}
-          key: android-toolchains-swift-6.4.1-ndk-r30-v2
+          key: android-toolchains-swift-6.4.1-ndk-r30-v3
       - uses: actions/cache@v4
         with:
           path: |
