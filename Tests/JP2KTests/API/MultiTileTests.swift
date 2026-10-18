@@ -29,9 +29,9 @@ struct MultiTileTests {
         "modes-bypass.j2k", "modes-reset.j2k", "modes-termall.j2k", "modes-vcausal.j2k",
         "modes-pterm.j2k", "modes-segsym.j2k", "modes-all.j2k"
     ])
-    func losslessFixtureMatchesOpenJPEG(name: String) throws {
+    func losslessFixtureMatchesOpenJPEG(name: String) async throws {
         let input = Array(try Data(contentsOf: #require(Fixtures.url(name))))
-        let image = try JP2KDecoder().decodeComponents(input)
+        let image = try await JP2KDecoder().decodeComponents(input)
         let stem = String(name.split(separator: ".").first ?? "")
         // Expected component count comes from the OpenJPEG reference files
         // (<stem>_0.pgx, <stem>_1.pgx, ...), not from the decoder's own output.
@@ -52,7 +52,7 @@ struct MultiTileTests {
         }
     }
 
-    @Test func missingSecondTileIsRejected() throws {
+    @Test func missingSecondTileIsRejected() async throws {
         let input = Array(try Data(contentsOf: #require(Fixtures.url("two-tiles-127x61.j2k"))))
         let (prefix, chunks) = try parts(input)
         #expect(Set(chunks.map(\.tile)) == [0, 1])
@@ -60,12 +60,12 @@ struct MultiTileTests {
         var damaged = prefix
         for chunk in chunks where chunk.tile != 1 { damaged.append(contentsOf: chunk.bytes) }
         damaged.append(contentsOf: [0xFF, 0xD9])
-        #expect(throws: JP2KError.invalidCodestream(.badTilePart)) {
-            _ = try JP2KDecoder().decodeComponents(damaged)
+        await #expect(throws: JP2KError.invalidCodestream(.badTilePart)) {
+            _ = try await JP2KDecoder().decodeComponents(damaged)
         }
     }
 
-    @Test func absentTileWithoutComponentSamplesDecodes() throws {
+    @Test func absentTileWithoutComponentSamplesDecodes() async throws {
         let bytes = Array(try Data(contentsOf: #require(Fixtures.url("empty-leading-tile.j2k"))))
         var context = DecodeContext(limits: Limits())
         let header = try MainHeaderParser.parse(bytes, range: 0..<bytes.count, context: &context)
@@ -77,14 +77,14 @@ struct MultiTileTests {
         let tiles = try TilePartParser.parse(bytes, header: header, context: &context)
         #expect(tiles.map(\.index) == [1])
         let reference = try PGX.parse(Array(Data(contentsOf: #require(Fixtures.url("empty-leading-tile_0.pgx")))))
-        let image = try JP2KDecoder().decodeComponents(bytes)
+        let image = try await JP2KDecoder().decodeComponents(bytes)
         #expect(image.components.count == 1)
         #expect(image.components[0] == reference.samples)
     }
 
-    @Test func tilePartsMayBeInterleavedAcrossTiles() throws {
+    @Test func tilePartsMayBeInterleavedAcrossTiles() async throws {
         let input = Array(try Data(contentsOf: #require(Fixtures.url("two-tiles-127x61.j2k"))))
-        let expected = try JP2KDecoder().decodeComponents(input)
+        let expected = try await JP2KDecoder().decodeComponents(input)
         let (prefix, chunks) = try parts(input)
         #expect(chunks.count == 10)
         var interleaved = prefix
@@ -95,6 +95,6 @@ struct MultiTileTests {
             }
         }
         interleaved.append(contentsOf: [0xFF, 0xD9])
-        #expect(try JP2KDecoder().decodeComponents(interleaved).components == expected.components)
+        #expect(try await JP2KDecoder().decodeComponents(interleaved).components == expected.components)
     }
 }

@@ -44,14 +44,14 @@
 /// Decodes one tile with a reusable Tier 1 scratch decoder.
 enum TileDecoder {
     static func decode(_ tile: TileData, header: MainHeader,
-                       context: inout DecodeContext) throws(JP2KError) -> TileGeometry {
+                       context: inout DecodeContext) async throws(JP2KError) -> TileGeometry {
         var geometry = try TileGeometryBuilder.build(tile: tile, header: header, context: &context)
         let positions = try PacketIterator.positions(geometry: geometry, parameters: tile.parameters,
                                                      header: header, tileIndex: tile.index, context: &context)
         try PacketDecoder.decodeTile(tile, geometry: &geometry, positions: positions, context: &context)
         for component in geometry.components.indices {
             let coding = tile.parameters.coc[component] ?? tile.parameters.cod.component
-            try decodeCodeBlocks(tile, component: component, geometry: &geometry, context: &context)
+            try await decodeCodeBlocks(tile, component: component, geometry: &geometry, context: &context)
             try InverseDWT.decode(&geometry.components[component].coefficients,
                                   resolutions: geometry.components[component].resolutions,
                                   reversible: coding.reversible, budget: &context.budget)
@@ -75,13 +75,13 @@ enum TileDecoder {
     /// copy-on-write of the plane), and it is charged to the budget while it
     /// exists.
     private static func decodeCodeBlocks(_ tile: TileData, component: Int, geometry: inout TileGeometry,
-                                         context: inout DecodeContext) throws(JP2KError) {
+                                         context: inout DecodeContext) async throws(JP2KError) {
         var listBytes = 0
         defer { context.budget.release(bytes: listBytes) }
         let jobs = try codeBlockJobs(tile, component: component, geometry.components[component],
                                      listBytes: &listBytes, budget: &context.budget)
         if jobs.isEmpty { return }
-        try CodeBlockScheduler.run(jobs, geometry: &geometry, context: &context)
+        try await CodeBlockScheduler.run(jobs, geometry: &geometry, context: &context)
     }
 
     /// Lists the component's code-blocks with coded passes in OpenJPEG's

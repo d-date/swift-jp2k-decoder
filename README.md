@@ -21,18 +21,20 @@ import JP2K
 let bytes = Array(try Data(contentsOf: URL(fileURLWithPath: "image.jp2")))
 let decoder = JP2KDecoder()
 let info = try decoder.readInfo(bytes)
-let image = try decoder.decodePixels(bytes)
+let image = try await decoder.decodePixels(bytes)
 let bmp = try image.bmp()
 
 // For a raw codestream with no declared colour space:
 let rawBytes = Array(try Data(contentsOf: URL(fileURLWithPath: "image.j2k")))
-let components = try decoder.decodeComponents(rawBytes)
-let gray = try decoder.decodePixels(rawBytes, color: .assume(.gray8))
-let crop = try decoder.decodePixels(rawBytes, color: .assume(.gray8),
-                                    region: .pixels(x: 0, y: 0, width: 32, height: 32))
+let components = try await decoder.decodeComponents(rawBytes)
+let gray = try await decoder.decodePixels(rawBytes, color: .assume(.gray8))
+let crop = try await decoder.decodePixels(rawBytes, color: .assume(.gray8),
+                                          region: .pixels(x: 0, y: 0, width: 32, height: 32))
 ```
 
 `decodePixels` uses the JP2 container's colour space by default. For a raw codestream, supply `.assume(...)` or `.inferFromComponentCount`. All decoding errors use `JP2KError`.
+
+`decodeComponents` and `decodePixels` are `async` and `@concurrent`: they run on the concurrency pool, never on the caller's actor, so calling them from the main actor does not block it. Large tiles fan out to child tasks. `readInfo` only parses headers and stays synchronous.
 
 ## Default limits
 
@@ -68,18 +70,18 @@ Apple Silicon release build, `swift run -c release jp2k-bench`: five warm-ups an
 
 | Input | JP2K | ImageIO |
 | --- | ---: | ---: |
-| Gray 378×472, lossless 5/3 | 6.1 | 20.6 |
-| Gray 378×472, lossy 9/7 | 2.4 | 2.0 |
+| Gray 378×472, lossless 5/3 | 6.0 | 20.6 |
+| Gray 378×472, lossy 9/7 | 2.5 | 2.0 |
 | RGB 64×64, lossless | 2.2 | 1.5 |
-| RGB 64×64, lossy | 0.24 | 0.27 |
-| `file2.jp2`, 480×640 sYCC | 23.9 | 65.3 |
-| `p0_07.j2k`, 2048×2048 | 475 | 1,161 |
+| RGB 64×64, lossy | 0.23 | 0.27 |
+| `file2.jp2`, 480×640 sYCC | 25.4 | 65.3 |
+| `p0_07.j2k`, 2048×2048 | 1,636 | 1,143 |
 
-The two conformance rows need `JP2K_CONFORMANCE_DIR`. `p0_07.j2k` is decoded on several threads, so it was measured on an otherwise idle machine; with other processes holding a few cores it took about 1.65 s.
+The two conformance rows need `JP2K_CONFORMANCE_DIR`.
 
-Code-blocks within a tile are decoded on up to `maxThreads` threads; tiles with fewer than 32,768 coded samples stay on one thread. The output is identical for every thread count, and the same input fails with the same error. Worker scratch is reserved from `maxMemoryBytes` first; if it does not fit, the tile is decoded on one thread instead. On Apple platforms the parallel path needs macOS 15 or iOS 18 (for `Synchronization`); earlier versions decode serially.
+Code-blocks within a tile are decoded by up to `maxThreads` child tasks; tiles with fewer than 32,768 coded samples stay on one thread. The output is identical for every thread count, and the same input fails with the same error. Each worker's scratch and output are reserved from `maxMemoryBytes` first; if they do not fit, the tile is decoded on one thread instead.
 
-JP2K is about 3× faster than ImageIO on the gray lossless image, about 2.7× faster on the sYCC image and about 2.4× faster on the 2048×2048 image. ImageIO stays ahead on the small lossy and RGB cases, where fixed per-image costs dominate. A Linux aarch64 Docker run on the same machine measured 10.4 ms (lossless) and 3.0 ms (lossy) for the gray image; Windows timings are printed by CI.
+JP2K is about 3× faster than ImageIO on the gray lossless image and about 2.6× faster on the sYCC image. ImageIO stays ahead on the small lossy and RGB cases, where fixed per-image costs dominate, and on `p0_07.j2k`: its 256 tiles of 128×128 each fall below the parallel threshold, so this decoder runs it on one thread. A Linux aarch64 Docker run on the same machine measured 10.4 ms (lossless) and 3.0 ms (lossy) for the gray image; Windows timings are printed by CI.
 
 ## Testing
 

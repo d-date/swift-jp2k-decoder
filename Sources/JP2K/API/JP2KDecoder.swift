@@ -89,7 +89,8 @@ public struct JP2KDecoder: Sendable {
     }
 
     /// Decodes every codestream component at its native precision.
-    public func decodeComponents(_ bytes: Span<UInt8>) throws(JP2KError) -> ComponentImage {
+    @concurrent
+    public func decodeComponents(_ bytes: Span<UInt8>) async throws(JP2KError) -> ComponentImage {
         if bytes.count < 12 { throw .inputSize }
         if bytes.count > limits.maxInputBytes { throw .limitExceeded(.inputBytes) }
         var context = DecodeContext(limits: limits)
@@ -97,39 +98,41 @@ public struct JP2KDecoder: Sendable {
         var input: [UInt8] = []
         input.reserveCapacity(bytes.count)
         for index in 0..<bytes.count { input.append(bytes[index]) }
-        return try decodeComponentsArray(input, context: &context)
+        return try await decodeComponentsArray(input, context: &context)
     }
 
     /// Decodes every codestream component at its native precision.
-    public func decodeComponents(_ bytes: [UInt8]) throws(JP2KError) -> ComponentImage {
+    @concurrent
+    public func decodeComponents(_ bytes: [UInt8]) async throws(JP2KError) -> ComponentImage {
         if bytes.count < 12 { throw .inputSize }
         if bytes.count > limits.maxInputBytes { throw .limitExceeded(.inputBytes) }
         var context = DecodeContext(limits: limits)
         try context.budget.reserve(bytes: bytes.count)
-        return try decodeComponentsArray(bytes, context: &context)
+        return try await decodeComponentsArray(bytes, context: &context)
     }
 
-    private func decodeComponentsArray(_ input: [UInt8], context: inout DecodeContext) throws(JP2KError) -> ComponentImage {
-        let (info, _, file, components) = try decodeTileComponents(input, context: &context)
+    private func decodeComponentsArray(_ input: [UInt8], context: inout DecodeContext) async throws(JP2KError) -> ComponentImage {
+        let (info, _, file, components) = try await decodeTileComponents(input, context: &context)
         let profile: [UInt8]?
         if let file, case .restrictedICC(let bytes) = file.header.colour { profile = bytes } else { profile = nil }
         return ComponentImage(info: info, components: components, iccProfile: profile)
     }
 
-    func decodeComponentsWithMetrics(_ bytes: [UInt8]) throws(JP2KError) -> (ComponentImage, DecodeMetrics) {
+    func decodeComponentsWithMetrics(_ bytes: [UInt8]) async throws(JP2KError) -> (ComponentImage, DecodeMetrics) {
         if bytes.count < 12 { throw .inputSize }
         if bytes.count > limits.maxInputBytes { throw .limitExceeded(.inputBytes) }
         var context = DecodeContext(limits: limits)
         try context.budget.reserve(bytes: bytes.count)
-        let image = try decodeComponentsArray(bytes, context: &context)
+        let image = try await decodeComponentsArray(bytes, context: &context)
         return (image, DecodeMetrics(packets: context.packets, packetWork: context.packetWork,
                                      codingPasses: context.codingPasses, markerDataBytes: context.markerDataBytes,
                                      peakMemoryBytes: context.budget.peak, parallelRuns: context.parallelRuns))
     }
 
     /// Decodes to eight-bit interleaved pixels.
+    @concurrent
     public func decodePixels(_ bytes: Span<UInt8>, color: ColorInterpretation = .container,
-                             region: Region? = nil) throws(JP2KError) -> PixelImage {
+                             region: Region? = nil) async throws(JP2KError) -> PixelImage {
         if bytes.count < 12 { throw .inputSize }
         if bytes.count > limits.maxInputBytes { throw .limitExceeded(.inputBytes) }
         var context = DecodeContext(limits: limits)
@@ -137,35 +140,36 @@ public struct JP2KDecoder: Sendable {
         var input: [UInt8] = []
         input.reserveCapacity(bytes.count)
         for index in 0..<bytes.count { input.append(bytes[index]) }
-        return try decodePixelsArray(input, color: color, region: region, context: &context)
+        return try await decodePixelsArray(input, color: color, region: region, context: &context)
     }
 
     /// Decodes to eight-bit interleaved pixels.
+    @concurrent
     public func decodePixels(_ bytes: [UInt8], color: ColorInterpretation = .container,
-                             region: Region? = nil) throws(JP2KError) -> PixelImage {
+                             region: Region? = nil) async throws(JP2KError) -> PixelImage {
         if bytes.count < 12 { throw .inputSize }
         if bytes.count > limits.maxInputBytes { throw .limitExceeded(.inputBytes) }
         var context = DecodeContext(limits: limits)
         try context.budget.reserve(bytes: bytes.count)
-        return try decodePixelsArray(bytes, color: color, region: region, context: &context)
+        return try await decodePixelsArray(bytes, color: color, region: region, context: &context)
     }
 
     private func decodePixelsArray(_ input: [UInt8], color: ColorInterpretation, region: Region?,
-                                   context: inout DecodeContext) throws(JP2KError) -> PixelImage {
-        let (info, header, file, components) = try decodeTileComponents(input, context: &context)
+                                   context: inout DecodeContext) async throws(JP2KError) -> PixelImage {
+        let (info, header, file, components) = try await decodeTileComponents(input, context: &context)
         let image = ComponentImage(info: info, components: components, iccProfile: nil)
         return try ColorConverter.convert(image, header: file?.header, color: color, region: region,
                                           referenceOrigin: (header.geometry.x0, header.geometry.y0), context: &context)
     }
 
     private func decodeTileComponents(_ input: [UInt8], context: inout DecodeContext)
-        throws(JP2KError) -> (ImageInfo, MainHeader, JP2File?, [[Int32]]) {
+        async throws(JP2KError) -> (ImageInfo, MainHeader, JP2File?, [[Int32]]) {
         let (info, header, file) = try parseInfoArray(input, context: &context)
         let tileParts = try TilePartParser.parse(input, header: header, context: &context)
         try context.budget.reserve(bytes: try Checked.mul(tileParts.count, MemoryLayout<TileGeometry>.stride))
         var tiles: [TileGeometry] = []
         tiles.reserveCapacity(tileParts.count)
-        for tile in tileParts { tiles.append(try TileDecoder.decode(tile, header: header, context: &context)) }
+        for tile in tileParts { tiles.append(try await TileDecoder.decode(tile, header: header, context: &context)) }
         let components = try ComponentAssembler.assemble(tiles, info: info, context: &context)
         return (info, header, file, components)
     }

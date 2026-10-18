@@ -25,13 +25,13 @@ private func percentile(_ samples: [Double], _ fraction: Double) -> Double {
     return sorted[lower] + (sorted[upper] - sorted[lower]) * weight
 }
 
-private func time(_ warmups: Int, _ iterations: Int, _ action: () throws -> Void) throws -> (Double, Double) {
-    for _ in 0..<warmups { try action() }
+private func time(_ warmups: Int, _ iterations: Int, _ action: () async throws -> Void) async throws -> (Double, Double) {
+    for _ in 0..<warmups { try await action() }
     var samples: [Double] = []
     samples.reserveCapacity(iterations)
     for _ in 0..<iterations {
         let start = DispatchTime.now().uptimeNanoseconds
-        try action()
+        try await action()
         let end = DispatchTime.now().uptimeNanoseconds
         samples.append(Double(end - start) / 1_000_000)
     }
@@ -64,7 +64,7 @@ private enum BenchError: Error {
     case decodeFailed
 }
 
-private func run() throws {
+private func run() async throws {
     let arguments = Array(CommandLine.arguments.dropFirst())
     let quick = arguments.contains("--quick")
     let fixtureDirectory = ProcessInfo.processInfo.environment["JP2K_FIXTURES_DIR"]
@@ -91,22 +91,22 @@ private func run() throws {
         guard FileManager.default.fileExists(atPath: item.url.path) else { throw BenchError.missingFixture(item.url.path) }
         let data = try Data(contentsOf: item.url)
         let bytes = [UInt8](data)
-        let swift = try time(warmups, iterations) {
-            let image = try JP2KDecoder().decodePixels(bytes, color: item.color)
+        let swift = try await time(warmups, iterations) {
+            let image = try await JP2KDecoder().decodePixels(bytes, color: item.color)
             _ = image.pixels.count
         }
         print("\(item.name),JP2K,\(String(format: "%.3f", swift.0)),\(String(format: "%.3f", swift.1))")
         #if canImport(ImageIO)
-        let format = try JP2KDecoder().decodePixels(bytes, color: item.color).format
+        let format = try await JP2KDecoder().decodePixels(bytes, color: item.color).format
         let gray = format == .gray8
-        let imageIO = try time(warmups, iterations) { try decodeImageIO(data, gray: gray) }
+        let imageIO = try await time(warmups, iterations) { try decodeImageIO(data, gray: gray) }
         print("\(item.name),ImageIO,\(String(format: "%.3f", imageIO.0)),\(String(format: "%.3f", imageIO.1))")
         #endif
     }
 }
 
 do {
-    try run()
+    try await run()
 } catch {
     FileHandle.standardError.write(Data("jp2k-bench: \(error)\n".utf8))
     exit(1)

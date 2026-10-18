@@ -31,10 +31,10 @@ ImageInfo.height | let height: Int
 ImageInfo.isJP2Container | let isJP2Container: Bool
 ImageInfo.width | let width: Int
 JP2KDecoder | struct JP2KDecoder
-JP2KDecoder.decodeComponents(_:) | func decodeComponents(_ bytes: Span<UInt8>) throws(JP2KError) -> ComponentImage
-JP2KDecoder.decodeComponents(_:) | func decodeComponents(_ bytes: [UInt8]) throws(JP2KError) -> ComponentImage
-JP2KDecoder.decodePixels(_:color:region:) | func decodePixels(_ bytes: Span<UInt8>, color: ColorInterpretation = .container, region: Region? = nil) throws(JP2KError) -> PixelImage
-JP2KDecoder.decodePixels(_:color:region:) | func decodePixels(_ bytes: [UInt8], color: ColorInterpretation = .container, region: Region? = nil) throws(JP2KError) -> PixelImage
+JP2KDecoder.decodeComponents(_:) | @concurrent func decodeComponents(_ bytes: Span<UInt8>) async throws(JP2KError) -> ComponentImage
+JP2KDecoder.decodeComponents(_:) | @concurrent func decodeComponents(_ bytes: [UInt8]) async throws(JP2KError) -> ComponentImage
+JP2KDecoder.decodePixels(_:color:region:) | @concurrent func decodePixels(_ bytes: Span<UInt8>, color: ColorInterpretation = .container, region: Region? = nil) async throws(JP2KError) -> PixelImage
+JP2KDecoder.decodePixels(_:color:region:) | @concurrent func decodePixels(_ bytes: [UInt8], color: ColorInterpretation = .container, region: Region? = nil) async throws(JP2KError) -> PixelImage
 JP2KDecoder.init(limits:) | init(limits: Limits = Limits())
 JP2KDecoder.limits | var limits: Limits
 JP2KDecoder.readInfo(_:) | func readInfo(_ bytes: Span<UInt8>) throws(JP2KError) -> ImageInfo

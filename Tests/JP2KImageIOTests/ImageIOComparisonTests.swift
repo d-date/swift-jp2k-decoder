@@ -51,7 +51,7 @@ private func imageIOPixels(_ data: Data, name: String, gray: Bool) throws -> (In
     return (image.width, image.height, pixels)
 }
 
-@Test func fixturePixelsMatchImageIO() throws {
+@Test func fixturePixelsMatchImageIO() async throws {
     let cases = [
         ComparisonCase(name: "gray-378x472-53.jp2", tolerance: 0, conformance: false, compareAlpha: true),
         ComparisonCase(name: "gray-378x472-97.jp2", tolerance: 2, conformance: false, compareAlpha: true),
@@ -62,11 +62,11 @@ private func imageIOPixels(_ data: Data, name: String, gray: Bool) throws -> (In
         // Both decoders are lossless at native depth; their 16-to-8-bit rounding differs by one.
         ComparisonCase(name: "gray16-40x30.jp2", tolerance: 1, conformance: false, compareAlpha: true),
     ]
-    for item in cases { try compare(item) }
+    for item in cases { try await compare(item) }
 }
 
 @Test(.enabled(if: ProcessInfo.processInfo.environment["JP2K_CONFORMANCE_DIR"] != nil))
-func conformancePixelsMatchImageIO() throws {
+func conformancePixelsMatchImageIO() async throws {
     // file5, file7 and file8 carry ICC profiles, which decodePixels(.container)
     // reports as unsupported by design (ImageIO applies them), so they are not
     // pixel-compared. file1/4/9 are lossless 8-bit and must match exactly;
@@ -79,12 +79,12 @@ func conformancePixelsMatchImageIO() throws {
         ComparisonCase(name: "file6.jp2", tolerance: 1, conformance: true, compareAlpha: true),
         ComparisonCase(name: "file9.jp2", tolerance: 0, conformance: true, compareAlpha: true),
     ]
-    for item in cases { try compare(item) }
+    for item in cases { try await compare(item) }
 }
 
-private func compare(_ item: ComparisonCase) throws {
+private func compare(_ item: ComparisonCase) async throws {
     let data = try Data(contentsOf: inputURL(item))
-    let image = try JP2KDecoder().decodePixels([UInt8](data))
+    let image = try await JP2KDecoder().decodePixels([UInt8](data))
     let gray: Bool
     switch image.format {
     case .gray8: gray = true

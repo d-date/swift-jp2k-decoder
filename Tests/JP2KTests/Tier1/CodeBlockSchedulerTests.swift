@@ -19,28 +19,32 @@ struct CodeBlockSchedulerTests {
         return limits
     }
 
-    private func outcome(_ bytes: [UInt8], _ base: Limits) -> Result<[[Int32]], JP2KError> {
+    private func outcome(_ bytes: [UInt8], _ base: Limits) async -> Result<[[Int32]], JP2KError> {
         // Bit flips can inflate the declared size or work; keep each decode small.
         var limits = base
         limits.maxPixels = 1 << 16
         limits.maxCodingPasses = 1 << 16
         limits.maxPacketIterations = 1 << 16
-        return Result { () throws(JP2KError) in try JP2KDecoder(limits: limits).decodeComponents(bytes).components }
+        do {
+            return .success(try await JP2KDecoder(limits: limits).decodeComponents(bytes).components)
+        } catch {
+            return .failure(error)
+        }
     }
 
     @Test(arguments: fixtureNames)
-    func parallelOutputMatchesSerial(name: String) throws {
+    func parallelOutputMatchesSerial(name: String) async throws {
         let bytes = Array(try Data(contentsOf: #require(Fixtures.url(name))))
-        let serial = try JP2KDecoder(limits: limits(threads: 1)).decodeComponentsWithMetrics(bytes)
+        let serial = try await JP2KDecoder(limits: limits(threads: 1)).decodeComponentsWithMetrics(bytes)
         #expect(serial.1.parallelRuns == 0)
         for threads in [2, 8] {
-            let parallel = try JP2KDecoder(limits: limits(threads: threads)).decodeComponentsWithMetrics(bytes)
+            let parallel = try await JP2KDecoder(limits: limits(threads: threads)).decodeComponentsWithMetrics(bytes)
             #expect(parallel.0.components == serial.0.components, "\(name) with \(threads) threads")
             #expect(parallel.1.parallelRuns > 0, "\(name) with \(threads) threads took the serial path")
         }
     }
 
-    @Test func corruptInputsFailTheSameWayOnAnyThreadCount() throws {
+    @Test func corruptInputsFailTheSameWayOnAnyThreadCount() async throws {
         // Bit flips must give the same result (same pixels or the same error)
         // whether code-blocks are decoded serially or not. (Truncations almost
         // always fail while parsing, before Tier-1, so they add little here.)
@@ -49,17 +53,18 @@ struct CodeBlockSchedulerTests {
         let bytes = Array(try Data(contentsOf: #require(Fixtures.url("modes-all.j2k"))))
         var mismatches = 0
         var parallelDecodes = 0
-        func compare(_ input: [UInt8]) {
-            if outcome(input, limits(threads: 1)) != outcome(input, limits(threads: 4)) { mismatches += 1 }
+        func compare(_ input: [UInt8]) async {
+            let serial = await outcome(input, limits(threads: 1))
+            if await outcome(input, limits(threads: 4)) != serial { mismatches += 1 }
             var parallel = limits(threads: 4)
             parallel.maxPixels = 1 << 16
-            if let runs = try? JP2KDecoder(limits: parallel).decodeComponentsWithMetrics(input).1.parallelRuns,
+            if let runs = try? await JP2KDecoder(limits: parallel).decodeComponentsWithMetrics(input).1.parallelRuns,
                runs > 0 { parallelDecodes += 1 }
         }
         for position in stride(from: 40, to: bytes.count, by: 89) {
             var input = bytes
             input[position] ^= 0x5A
-            compare(input)
+            await compare(input)
         }
         #expect(mismatches == 0)
         // Some damaged inputs must still reach (and finish) the parallel
@@ -67,21 +72,21 @@ struct CodeBlockSchedulerTests {
         #expect(parallelDecodes > 0)
     }
 
-    @Test func tightBudgetFallsBackToSerialInsteadOfFailing() throws {
+    @Test func tightBudgetFallsBackToSerialInsteadOfFailing() async throws {
         let bytes = Array(try Data(contentsOf: #require(Fixtures.url("gray-378x472-53.jp2"))))
-        let measured = try JP2KDecoder(limits: limits(threads: 1)).decodeComponentsWithMetrics(bytes)
+        let measured = try await JP2KDecoder(limits: limits(threads: 1)).decodeComponentsWithMetrics(bytes)
         // The serial peak plus 16 KiB (allocator rounding varies between runs
         // on glibc) leaves no room for eight workers' output and scratch
         // shares, so the parallel request must quietly decode on one thread.
         var tight = limits(threads: 8)
         tight.maxMemoryBytes = measured.1.peakMemoryBytes + 16_384
-        let image = try JP2KDecoder(limits: tight).decodeComponentsWithMetrics(bytes)
+        let image = try await JP2KDecoder(limits: tight).decodeComponentsWithMetrics(bytes)
         #expect(image.0.components == measured.0.components)
         #expect(image.1.parallelRuns == 0)
         // With room to spare the same request does run in parallel.
         var roomy = limits(threads: 8)
         roomy.maxMemoryBytes = measured.1.peakMemoryBytes * 2
-        #expect(try JP2KDecoder(limits: roomy).decodeComponentsWithMetrics(bytes).1.parallelRuns > 0)
+        #expect(try await JP2KDecoder(limits: roomy).decodeComponentsWithMetrics(bytes).1.parallelRuns > 0)
     }
 
     // MARK: - Error order on synthetic jobs
@@ -113,12 +118,12 @@ struct CodeBlockSchedulerTests {
         return job
     }
 
-    private func schedule(_ faults: [Fault], threads: Int) -> JP2KError? {
+    private func schedule(_ faults: [Fault], threads: Int) async -> JP2KError? {
         var geometry = grid()
         var context = DecodeContext(limits: limits(threads: threads))
         let jobs = faults.enumerated().map { job($0.offset, $0.element) }
         do {
-            try CodeBlockScheduler.run(jobs, geometry: &geometry, context: &context)
+            try await CodeBlockScheduler.run(jobs, geometry: &geometry, context: &context)
             return nil
         } catch {
             return error
@@ -131,16 +136,17 @@ struct CodeBlockSchedulerTests {
         ([Fault.none, .after, .before, .decode], JP2KError.limitExceeded(.layers)),
         ([Fault.none, .none, .none, .after], JP2KError.limitExceeded(.layers))
     ])
-    func lowestFailingBlockWinsOnEveryPath(faults: [Fault], expected: JP2KError) {
+    func lowestFailingBlockWinsOnEveryPath(faults: [Fault], expected: JP2KError) async {
         // The serial loop stops at the first failing block; the parallel path
         // must report that same block's error even when later blocks fail
         // first on other threads.
         for threads in [1, 2, 4] {
-            #expect(schedule(faults, threads: threads) == expected, "\(threads) threads")
+            let error = await schedule(faults, threads: threads)
+            #expect(error == expected, "\(threads) threads")
         }
     }
 
-    @Test func errorBeforeDecodeSkipsTheDecodeAndAfterStillDecodes() {
+    @Test func errorBeforeDecodeSkipsTheDecodeAndAfterStillDecodes() async {
         // A block whose listing failed before decoding reports that error even
         // if decoding it would also fail; a placement error comes after a
         // successful decode, so a decode failure in the same block wins.
@@ -153,8 +159,11 @@ struct CodeBlockSchedulerTests {
                                           (decodeThenPlace, JP2KError.invalidCodestream(.badCodeBlock))] {
                 var geometry = grid()
                 var context = DecodeContext(limits: limits(threads: threads))
-                #expect(throws: expected) {
-                    try CodeBlockScheduler.run([candidate, job(1, .none)], geometry: &geometry, context: &context)
+                do {
+                    try await CodeBlockScheduler.run([candidate, job(1, .none)], geometry: &geometry, context: &context)
+                    Issue.record("expected \(expected) with \(threads) threads")
+                } catch {
+                    #expect(error == expected, "\(threads) threads")
                 }
             }
         }

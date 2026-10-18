@@ -35,8 +35,8 @@ public struct Limits: Sendable, Equatable {
     public var maxMarkerDataBytes: Int = 8 << 20
     /// Upper bound on workers used for Tier-1 decoding of one tile component;
     /// 1 decodes serially. Output and errors are identical for every value.
-    /// Workers run through Dispatch, which runs no more of them at once than
-    /// there are available cores. Worker scratch comes out of
+    /// Workers are child tasks on the concurrency pool, which runs no more of
+    /// them at once than there are available cores. Worker scratch comes out of
     /// `maxMemoryBytes`; when it does not fit, decoding falls back to one
     /// thread instead of failing.
     public var maxThreads: Int = 8

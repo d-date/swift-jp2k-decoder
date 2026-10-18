@@ -38,9 +38,6 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 // Ported from OpenJPEG v2.5.4: t1.c: opj_t1_decode_cblks, opj_t1_clbl_decode_processor
-import Dispatch
-import Synchronization
-
 /// One code-block to decode. Placement is validated by TileDecoder; an
 /// error found while listing the block is kept and raised when the block is
 /// reached, before or after decoding it as the original loop did.
@@ -81,17 +78,18 @@ struct CodeBlockJob: Sendable {
 }
 
 /// Runs Tier-1 for one tile component. Code-blocks are independent, so
-/// large components are split across threads; each worker owns its scratch and a
-/// private budget carved out of the decode budget beforehand. Results are
-/// merged in job order, so output and errors match the serial path exactly.
+/// large components are split across child tasks; each worker owns its
+/// scratch and a private budget carved out of the decode budget beforehand.
+/// Results are merged in job order, so output and errors match the serial
+/// path exactly.
 enum CodeBlockScheduler {
     static func run(_ jobs: [CodeBlockJob], geometry: inout TileGeometry,
-                    context: inout DecodeContext) throws(JP2KError) {
+                    context: inout DecodeContext) async throws(JP2KError) {
         guard !jobs.isEmpty else { return }
         let workers = try workerCount(for: jobs, limit: context.limits.maxThreads,
                                       threshold: context.limits.parallelSampleThreshold)
-        if workers > 1, #available(macOS 15, iOS 18, tvOS 18, watchOS 11, visionOS 2, *) {
-            if try runParallel(jobs, workers: workers, geometry: &geometry, context: &context) { return }
+        if workers > 1, try await runParallel(jobs, workers: workers, geometry: &geometry, context: &context) {
+            return
         }
         try runSerial(jobs, geometry: &geometry, budget: &context.budget)
     }
@@ -175,40 +173,18 @@ enum CodeBlockScheduler {
 
     // MARK: - Parallel path
 
-    /// What the workers hand back: one output slot per job, and the lowest
-    /// failing job seen so far.
-    private struct SharedResults: Sendable {
-        var outputs: [[Int32]]
-        var error: (job: Int, error: JP2KError)?
-    }
-
-    /// A budget the workers draw output arrays from concurrently. Like
-    /// MemoryBudget, it checks the requested bytes before an allocation and
-    /// the allocator's rounding right after it, so `used` never exceeds
-    /// `limit`; the limit itself was reserved from the decode budget.
-    @available(macOS 15, iOS 18, tvOS 18, watchOS 11, visionOS 2, *)
-    private struct SharedBudget: ~Copyable {
-        let limit: Int
-        let used = Atomic<Int>(0)
-
-        init(limit: Int) { self.limit = limit }
-
-        func reserve(bytes: Int) throws(JP2KError) {
-            if bytes < 0 { throw .limitExceeded(.memory) }
-            var current = used.load(ordering: .relaxed)
-            while true {
-                if bytes > limit - current { throw .limitExceeded(.memory) }
-                let (exchanged, original) = used.compareExchange(
-                    expected: current, desired: current + bytes, ordering: .relaxed)
-                if exchanged { return }
-                current = original
-            }
-        }
+    /// What one worker hands back: the coefficients of its jobs in order,
+    /// and the first of its jobs that failed.
+    private struct WorkerResult: Sendable {
+        let worker: Int
+        var outputs: [[Int32]] = []
+        var failure: (job: Int, error: JP2KError)?
     }
 
     /// Allocator rounding is covered by 512 bytes plus 1/8 per allocation,
     /// which bounds malloc rounding on every supported platform. It only
-    /// sizes the reservation; actual allocations are still checked.
+    /// sizes the reservation; each worker's budget still checks every
+    /// allocation against its share.
     private static func rounded(_ bytes: Int) throws(JP2KError) -> Int {
         try Checked.add(Checked.add(bytes, bytes / 8), 512)
     }
@@ -225,95 +201,93 @@ enum CodeBlockScheduler {
         return try Checked.add(flags, Checked.add(samples, mq))
     }
 
+    /// Worker `w` decodes jobs w, w + workers, w + 2·workers, … Its share
+    /// covers its scratch, the coefficient array of each of its jobs and the
+    /// list holding them, so workers never contend for a budget.
+    private static func shares(_ jobs: [CodeBlockJob], workers: Int, scratch: Int) throws(JP2KError) -> [Int] {
+        var shares = [Int](repeating: scratch, count: workers)
+        for index in jobs.indices {
+            let bytes = try rounded(Checked.mul(Checked.mul(jobs[index].width, jobs[index].height), 4))
+            shares[index % workers] = try Checked.add(shares[index % workers], bytes)
+        }
+        for worker in 0..<workers {
+            let list = try rounded(Checked.mul(strideCount(jobs.count, worker: worker, workers: workers),
+                                               MemoryLayout<[Int32]>.stride))
+            shares[worker] = try Checked.add(shares[worker], list)
+        }
+        return shares
+    }
+
+    private static func strideCount(_ jobCount: Int, worker: Int, workers: Int) throws(JP2KError) -> Int {
+        try Checked.ceilDiv(Checked.sub(jobCount, worker), workers)
+    }
+
     /// Returns false when the worker budgets cannot be reserved or a worker
     /// ran out of its share; the caller then decodes serially, which charges
     /// exactly what it uses.
-    @available(macOS 15, iOS 18, tvOS 18, watchOS 11, visionOS 2, *)
     private static func runParallel(_ jobs: [CodeBlockJob], workers: Int, geometry: inout TileGeometry,
-                                    context: inout DecodeContext) throws(JP2KError) -> Bool {
+                                    context: inout DecodeContext) async throws(JP2KError) -> Bool {
         let limits = scratchLimits(jobs)
         var maxData = 0
-        var outputBytes = 0
-        for job in jobs {
-            maxData = max(maxData, job.block.data.count)
-            outputBytes = try Checked.add(outputBytes, rounded(Checked.mul(Checked.mul(job.width, job.height), 4)))
-        }
+        for job in jobs { maxData = max(maxData, job.block.data.count) }
         let scratch = try scratchBytes(width: limits.width, height: limits.height, maxData: maxData)
-        let reserved = try Checked.add(outputBytes, Checked.mul(scratch, workers))
-        // The slot array is charged exactly; the workers' output arrays and
-        // scratch come out of `reserved`.
-        let slots: [[Int32]]
+        // The share list and the result list live until the merge ends, so
+        // they are reserved before the shares are computed.
+        var reserved = try Checked.add(rounded(Checked.mul(workers, MemoryLayout<Int>.stride)),
+                                       rounded(Checked.mul(workers, MemoryLayout<WorkerResult?>.stride)))
         do {
             try context.budget.reserve(bytes: reserved)
-            do {
-                slots = try context.budget.array(repeating: [], count: jobs.count)
-            } catch {
-                context.budget.release(bytes: reserved)
-                throw error
-            }
         } catch {
             return false
         }
-        let slotBytes = slots.capacity * MemoryLayout<[Int32]>.stride
-        defer {
-            context.budget.release(bytes: reserved)
-            context.budget.release(bytes: slotBytes)
+        defer { context.budget.release(bytes: reserved) }
+        let shares = try Self.shares(jobs, workers: workers, scratch: scratch)
+        var total = 0
+        for share in shares { total = try Checked.add(total, share) }
+        let withShares = try Checked.add(reserved, total)
+        do {
+            try context.budget.reserve(bytes: total)
+        } catch {
+            return false
         }
+        reserved = withShares
 
-        // Workers claim jobs in increasing order from a shared counter, so
-        // none sits idle while another works through a long list.
-        let next = Atomic<Int>(0)
-        let shared = SharedBudget(limit: outputBytes)
-        // `consume` hands the only reference to the Mutex, so filling a slot
-        // never triggers a copy-on-write of the whole slot array.
-        let results = Mutex(SharedResults(outputs: consume slots, error: nil))
-        DispatchQueue.concurrentPerform(iterations: workers) { _ in
-            var budget = MemoryBudget(limit: scratch)
-            var claimed = 0
-            do throws(JP2KError) {
-                var decoder = try CodeBlockDecoder(maxWidth: limits.width, maxHeight: limits.height, budget: &budget)
-                while true {
-                    claimed = next.wrappingAdd(1, ordering: .relaxed).oldValue
-                    if claimed >= jobs.count { break }
-                    let job = jobs[claimed]
-                    try decode(job, with: &decoder, budget: &budget)
-                    let count = try Checked.mul(job.width, job.height)
-                    let requested = try Checked.mul(count, MemoryLayout<Int32>.stride)
-                    try shared.reserve(bytes: requested)
-                    var values = [Int32](repeating: 0, count: count)
-                    let actual = try Checked.mul(values.capacity, MemoryLayout<Int32>.stride)
-                    if actual > requested { try shared.reserve(bytes: actual - requested) }
-                    for sample in values.indices { values[sample] = coefficient(job, decoder, sample) }
-                    let index = claimed
-                    results.withLock { $0.outputs[index] = values }
-                }
-            } catch {
-                // A worker stops at its first failure; scratch setup failing
-                // before any claim counts as job 0.
-                let index = min(claimed, jobs.count - 1)
-                results.withLock { state in
-                    if index < (state.error?.job ?? Int.max) { state.error = (index, error) }
+        // Indexed by worker, so the merge can find each job's output.
+        let results = await withTaskGroup(of: WorkerResult.self, returning: [WorkerResult?].self) { group in
+            for worker in 0..<workers {
+                let share = shares[worker]
+                group.addTask {
+                    decodeStride(jobs, worker: worker, workers: workers, limits: limits, share: share)
                 }
             }
+            var results = [WorkerResult?](repeating: nil, count: workers)
+            for await result in group { results[result.worker] = result }
+            return results
         }
-        let state = results.withLock { $0 }
 
-        // The lowest failing job is the one the serial path would report:
-        // jobs are claimed in increasing order and a worker stops only after
-        // a failure, so every job below the lowest failure was decoded.
-        if let failure = state.error {
+        // Each worker stops at its first failure and walks its jobs in
+        // increasing order, so its failure is the lowest failing job of its
+        // stride, and the lowest over all workers is the one the serial path
+        // would report: every job below it was decoded by some worker.
+        var failure: (job: Int, error: JP2KError)?
+        for case let result? in results {
+            if let found = result.failure, found.job < (failure?.job ?? Int.max) { failure = found }
+        }
+        if let failure {
             // A worker that outgrew its share says nothing about the input;
             // let the serial path decide.
             if failure.error == .limitExceeded(.memory) { return false }
             throw failure.error
         }
-        guard state.outputs.count == jobs.count else { throw .invalidCodestream(.badCodeBlock) }
+        // Merged in job order, as the serial path writes them.
         for index in jobs.indices {
             let job = jobs[index]
-            let values = state.outputs[index]
-            guard values.count == (try Checked.mul(job.width, job.height)) else {
+            guard let outputs = results[index % workers]?.outputs else { throw .invalidCodestream(.badCodeBlock) }
+            let slot = index / workers
+            guard slot < outputs.count, outputs[slot].count == (try Checked.mul(job.width, job.height)) else {
                 throw .invalidCodestream(.badCodeBlock)
             }
+            let values = outputs[slot]
             var row = try firstTarget(job, in: geometry)
             for source in stride(from: 0, to: values.count, by: max(job.width, 1)) {
                 let rowEnd = try Checked.add(row, job.width)
@@ -325,5 +299,33 @@ enum CodeBlockScheduler {
         }
         context.countParallelRun()
         return true
+    }
+
+    /// Body of one child task: decodes the worker's stride with its own
+    /// scratch and budget.
+    private static func decodeStride(_ jobs: [CodeBlockJob], worker: Int, workers: Int,
+                                     limits: (width: Int, height: Int), share: Int) -> WorkerResult {
+        var budget = MemoryBudget(limit: share)
+        var result = WorkerResult(worker: worker)
+        var index = worker
+        do throws(JP2KError) {
+            // Failing to set up counts as failing the worker's first job.
+            let count = try strideCount(jobs.count, worker: worker, workers: workers)
+            result.outputs = try budget.array(repeating: [], count: count)
+            var decoder = try CodeBlockDecoder(maxWidth: limits.width, maxHeight: limits.height, budget: &budget)
+            var slot = 0
+            while index < jobs.count {
+                let job = jobs[index]
+                try decode(job, with: &decoder, budget: &budget)
+                var values = try budget.array(repeating: Int32(0), count: Checked.mul(job.width, job.height))
+                for sample in values.indices { values[sample] = coefficient(job, decoder, sample) }
+                result.outputs[slot] = values
+                slot += 1
+                index = try Checked.add(index, workers)
+            }
+        } catch {
+            result.failure = (min(index, jobs.count - 1), error)
+        }
+        return result
     }
 }

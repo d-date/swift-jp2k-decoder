@@ -16,16 +16,16 @@ struct CorruptCorpusTests {
         }.sorted()
     }
 
-    private func decodeBoth(_ bytes: [UInt8], name: String, timed: Bool) {
+    private func decodeBoth(_ bytes: [UInt8], name: String, timed: Bool) async {
         let start = Date()
         let decoder = JP2KDecoder()
-        do { _ = try decoder.decodeComponents(bytes) } catch { /* Typed decoder error is expected. */ }
-        do { _ = try decoder.decodePixels(bytes, color: .inferFromComponentCount) }
+        do { _ = try await decoder.decodeComponents(bytes) } catch { /* Typed decoder error is expected. */ }
+        do { _ = try await decoder.decodePixels(bytes, color: .inferFromComponentCount) }
         catch { /* Typed decoder error is expected. */ }
         if timed { #expect(Date().timeIntervalSince(start) < 2, "Slow corrupt case: \(name)") }
     }
 
-    @Test func truncationSweep() throws {
+    @Test func truncationSweep() async throws {
         let names = try exhaustive ? fixtureNames() : ["levels-0.j2k", "rgba-33x17.jp2"]
         for name in names {
             let bytes = Array(try Data(contentsOf: #require(Fixtures.url(name))))
@@ -40,12 +40,12 @@ struct CorruptCorpusTests {
                 lengths = Array(Set((0..<80).map { $0 * bytes.count / 80 })).sorted()
             }
             for length in lengths {
-                decodeBoth(Array(bytes.prefix(length)), name: "\(name) prefix \(length)", timed: exhaustive)
+                await decodeBoth(Array(bytes.prefix(length)), name: "\(name) prefix \(length)", timed: exhaustive)
             }
         }
     }
 
-    @Test func bitFlipSweep() throws {
+    @Test func bitFlipSweep() async throws {
         let names = try exhaustive ? fixtureNames() : ["levels-0.j2k", "rgba-33x17.jp2"]
         for name in names {
             let source = Array(try Data(contentsOf: #require(Fixtures.url(name))))
@@ -56,7 +56,7 @@ struct CorruptCorpusTests {
                 let bit = UInt8(1 << ((state >> 32) & 7))
                 var bytes = source
                 bytes[offset] ^= bit
-                decodeBoth(bytes, name: "\(name) flip \(iteration) at \(offset)", timed: exhaustive)
+                await decodeBoth(bytes, name: "\(name) flip \(iteration) at \(offset)", timed: exhaustive)
             }
         }
     }
@@ -66,12 +66,12 @@ struct CorruptCorpusTests {
         ("huge-box.jp2", JP2KError.invalidContainer(.badBoxLength)),
         ("packet-header.j2k", JP2KError.invalidCodestream(.badPacketHeader))
     ])
-    func craftedRejections(name: String, expected: JP2KError) throws {
+    func craftedRejections(name: String, expected: JP2KError) async throws {
         let bytes = Array(try Data(contentsOf: #require(Fixtures.url("corrupt/\(name)"))))
-        #expect(throws: expected) { _ = try JP2KDecoder().decodeComponents(bytes) }
+        await #expect(throws: expected) { _ = try await JP2KDecoder().decodeComponents(bytes) }
     }
 
-    @Test func packetHeaderFixtureReachesSegmentLengthWidth() throws {
+    @Test func packetHeaderFixtureReachesSegmentLengthWidth() async throws {
         let bytes = Array(try Data(contentsOf: #require(Fixtures.url("corrupt/packet-header.j2k"))))
         let sod = try #require(bytes.indices.dropLast().first { bytes[$0] == 0xFF && bytes[$0 + 1] == 0x93 })
         var bits = PacketBitReader(bytes, range: (sod + 2)..<bytes.count)
@@ -88,17 +88,17 @@ struct CorruptCorpusTests {
         #expect(throws: JP2KError.invalidCodestream(.badPacketHeader)) {
             _ = try PacketDecoder.segmentLengthBitCount(3 + increment, passes: passes)
         }
-        #expect(throws: JP2KError.invalidCodestream(.badPacketHeader)) {
-            _ = try JP2KDecoder().decodeComponents(bytes)
+        await #expect(throws: JP2KError.invalidCodestream(.badPacketHeader)) {
+            _ = try await JP2KDecoder().decodeComponents(bytes)
         }
     }
 
-    @Test func tilePartFlood() throws {
+    @Test func tilePartFlood() async throws {
         let bytes = Array(try Data(contentsOf: #require(Fixtures.url("corrupt/tile-part-flood.j2k"))))
         var limits = Limits()
         limits.maxTileParts = 9_999
-        #expect(throws: JP2KError.limitExceeded(.tileParts)) {
-            _ = try JP2KDecoder(limits: limits).decodeComponents(bytes)
+        await #expect(throws: JP2KError.limitExceeded(.tileParts)) {
+            _ = try await JP2KDecoder(limits: limits).decodeComponents(bytes)
         }
     }
 

@@ -16,9 +16,9 @@ struct DecodeComponentsTests {
         ("levels-0.j2k", 1, 0),
         ("levels-max.j2k", 1, 0)
     ])
-    func referencePixels(name: String, count: Int, tolerance: Int) throws {
+    func referencePixels(name: String, count: Int, tolerance: Int) async throws {
         let url = try #require(Fixtures.url(name))
-        let image = try JP2KDecoder().decodeComponents(Array(Data(contentsOf: url)))
+        let image = try await JP2KDecoder().decodeComponents(Array(Data(contentsOf: url)))
         #expect(image.components.count == count)
         for index in 0..<count {
             let base = String(name.split(separator: ".").first ?? "")
@@ -35,7 +35,7 @@ struct DecodeComponentsTests {
         // One shared decoder value used from eight tasks at once (it is Sendable).
         let decoder = JP2KDecoder()
         let results = try await withThrowingTaskGroup(of: [Int32].self) { group in
-            for _ in 0..<8 { group.addTask { try decoder.decodeComponents(bytes).components[0] } }
+            for _ in 0..<8 { group.addTask { try await decoder.decodeComponents(bytes).components[0] } }
             var result: [[Int32]] = []
             for try await value in group { result.append(value) }
             return result

@@ -152,7 +152,7 @@ struct ColorConverterTests {
             BoxWriter.box("jp2c", stream)
     }
 
-    @Test func paletteAndChannelDefinition() throws {
+    @Test func paletteAndChannelDefinition() async throws {
         let raw = try fixture("gray-378x472-53.j2k")
         var entries: [UInt8] = []
         for index in 0..<256 {
@@ -162,8 +162,8 @@ struct ColorConverterTests {
         let mapping = BoxWriter.box("cmap", [0, 0, 1, 0, 0, 0, 1, 1, 0, 0, 1, 2])
         let bytes = jp2(stream: raw, width: 378, height: 472, components: 1, colour: 16,
                         extra: [palette, mapping])
-        let image = try JP2KDecoder().decodePixels(bytes)
-        let source = try JP2KDecoder().decodeComponents(raw)
+        let image = try await JP2KDecoder().decodePixels(bytes)
+        let source = try await JP2KDecoder().decodeComponents(raw)
         for index in [0, 1, 100, 1000] {
             let value = Int(source.components[0][index])
             #expect(Array(image.pixels[index * 3..<index * 3 + 3]) ==
@@ -173,13 +173,13 @@ struct ColorConverterTests {
                      BoxWriter.u16(0) + BoxWriter.u16(0) + BoxWriter.u16(3) +
                      BoxWriter.u16(1) + BoxWriter.u16(0) + BoxWriter.u16(2) +
                      BoxWriter.u16(2) + BoxWriter.u16(0) + BoxWriter.u16(1))
-        let swapped = try JP2KDecoder().decodePixels(jp2(stream: raw, width: 378, height: 472,
+        let swapped = try await JP2KDecoder().decodePixels(jp2(stream: raw, width: 378, height: 472,
                                                            components: 1, colour: 16,
                                                            extra: [palette, mapping, cdef]))
         #expect(Array(swapped.pixels.prefix(3)) == Array(image.pixels.prefix(3).reversed()))
     }
 
-    @Test func directMappingUsesPaletteColumnPrecision() throws {
+    @Test func directMappingUsesPaletteColumnPrecision() async throws {
         let raw = try fixture("gray-378x472-53.j2k")
         var entries: [UInt8] = []
         for index in 0..<256 { entries += [UInt8(index & 15), UInt8(index), UInt8(index)] }
@@ -187,16 +187,16 @@ struct ColorConverterTests {
         let mapping = BoxWriter.box("cmap", [0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 2])
         let bytes = jp2(stream: raw, width: 378, height: 472, components: 1, colour: 16,
                         extra: [palette, mapping])
-        let source = try JP2KDecoder().decodeComponents(raw)
+        let source = try await JP2KDecoder().decodeComponents(raw)
         let index = try #require(source.components[0].indices.first {
             source.components[0][$0] >= 1 && source.components[0][$0] <= 7
         })
-        let image = try JP2KDecoder().decodePixels(bytes)
+        let image = try await JP2KDecoder().decodePixels(bytes)
         let value = Int(source.components[0][index])
         #expect(image.pixels[index * 3] == UInt8(((value + 8) * 255 + 7) / 15))
     }
 
-    @Test func channelDefinitionAlpha() throws {
+    @Test func channelDefinitionAlpha() async throws {
         let source = try fixture("rgba-33x17.jp2")
         var context = DecodeContext(limits: Limits())
         let file = try JP2Parser.parse(source, context: &context)
@@ -209,18 +209,18 @@ struct ColorConverterTests {
         }
         let cdef = BoxWriter.box("cdef", records)
         let bytes = jp2(stream: raw, width: 33, height: 17, components: 4, colour: 16, extra: [cdef])
-        let image = try JP2KDecoder().decodePixels(bytes)
+        let image = try await JP2KDecoder().decodePixels(bytes)
         #expect(image.format == .rgba8)
-        let native = try JP2KDecoder().decodeComponents(source)
+        let native = try await JP2KDecoder().decodeComponents(source)
         #expect(image.pixels[3] == UInt8(native.components[3][0]))
         let bmp = try image.bmp()
         #expect(bmp[57] == image.pixels[3])
     }
 
-    @Test func subsamplingAndScaling() throws {
+    @Test func subsamplingAndScaling() async throws {
         let raw = try fixture("subsampled-rgb.j2k")
-        let image = try JP2KDecoder().decodePixels(raw, color: .assume(.rgb8))
-        let source = try JP2KDecoder().decodeComponents(raw)
+        let image = try await JP2KDecoder().decodePixels(raw, color: .assume(.rgb8))
+        let source = try await JP2KDecoder().decodeComponents(raw)
         #expect(image.pixels.count == image.width * image.height * 3)
         for (x, y) in [(0, 0), (1, 0), (2, 2), (image.width - 1, image.height - 1)] {
             for channel in 0..<3 {
@@ -235,11 +235,11 @@ struct ColorConverterTests {
         }
     }
 
-    @Test func nativePrecisionScaling() throws {
+    @Test func nativePrecisionScaling() async throws {
         for name in ["signed12-31x19.j2k", "gray16-40x30.jp2"] {
             let bytes = try fixture(name)
-            let native = try JP2KDecoder().decodeComponents(bytes)
-            let pixels = try JP2KDecoder().decodePixels(bytes, color: .assume(.gray8))
+            let native = try await JP2KDecoder().decodeComponents(bytes)
+            let pixels = try await JP2KDecoder().decodePixels(bytes, color: .assume(.gray8))
             let descriptor = native.info.components[0]
             let maximum = (1 << descriptor.precision) - 1
             for index in [0, native.components[0].count / 2, native.components[0].count - 1] {
@@ -250,14 +250,14 @@ struct ColorConverterTests {
         }
     }
 
-    @Test func colourErrors() throws {
+    @Test func colourErrors() async throws {
         let raw = try fixture("gray-378x472-53.j2k")
         let icc = BoxWriter.box("colr", [2, 0, 0, 1, 2, 3])
         let bytes = jp2(stream: raw, width: 378, height: 472, components: 1, colour: 17, colourBox: icc)
         let error = JP2KError.unsupported(.iccProfile)
-        #expect(throws: error) { try JP2KDecoder().decodePixels(bytes) }
+        await #expect(throws: error) { try await JP2KDecoder().decodePixels(bytes) }
     }
-    @Test func syccFormula() throws {
+    @Test func syccFormula() async throws {
         let source = try fixture("rgb-64-53-mct.jp2")
         var context = DecodeContext(limits: Limits())
         let file = try JP2Parser.parse(source, context: &context)
@@ -267,9 +267,9 @@ struct ColorConverterTests {
         }))
         try #require(raw[cod + 8] == 1)
         raw[cod + 8] = 0 // Disable MCT so the three decoded components are used as Y, Cb, Cr.
-        let components = try JP2KDecoder().decodeComponents(raw)
+        let components = try await JP2KDecoder().decodeComponents(raw)
         let bytes = jp2(stream: raw, width: 64, height: 64, components: 3, colour: 18)
-        let image = try JP2KDecoder().decodePixels(bytes)
+        let image = try await JP2KDecoder().decodePixels(bytes)
         let y = Int(components.components[0][0])
         let cb = Int(components.components[1][0]) - 128
         let cr = Int(components.components[2][0]) - 128
@@ -279,7 +279,7 @@ struct ColorConverterTests {
         #expect(Array(image.pixels.prefix(3)) == expected.map(UInt8.init))
     }
 
-    @Test func conformanceColourCases() throws {
+    @Test func conformanceColourCases() async throws {
         guard let root = Conformance.root() else { return }
         let directory = root.appendingPathComponent("input/conformance")
         // Reference hashes: Scripts/make-color-trace.sh (opj_decompress 2.5.4 PPM pixel data).
@@ -287,7 +287,7 @@ struct ColorConverterTests {
             let bytes = Array(try Data(contentsOf: directory.appendingPathComponent(name)))
             var limits = Limits()
             limits.maxInputBytes = max(limits.maxInputBytes, bytes.count)
-            let image = try JP2KDecoder(limits: limits).decodePixels(bytes)
+            let image = try await JP2KDecoder(limits: limits).decodePixels(bytes)
             #expect(image.width > 0 && image.height > 0)
             #expect(image.pixels.count == image.width * image.height * image.format.channels)
             if name == "file2.jp2" {

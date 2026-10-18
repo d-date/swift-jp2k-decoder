@@ -20,10 +20,10 @@ struct ConformanceDecodeTests {
     }
 
     @Test(arguments: Conformance.class1.filter { $0.resFactor == 0 })
-    func classOne(item: ConformanceCase) throws {
+    func classOne(item: ConformanceCase) async throws {
         guard let root = Conformance.root() else { return }
         let input = try Data(contentsOf: Conformance.inputURL(item, root: root))
-        let image = try decoder.decodeComponents(Array(input))
+        let image = try await decoder.decodeComponents(Array(input))
         // The OpenJPEG conformance table checks only four of p0_13's 257 components.
         #expect(image.components.count == (item.name == "p0_13.j2k" ? 257 : item.componentCount))
         for index in 0..<item.componentCount {
@@ -47,12 +47,12 @@ struct ConformanceDecodeTests {
     }
 
     @Test(arguments: nonregressionNames)
-    func nonregressionPixelsMeetOpenJPEGTolerances(name: String) throws {
+    func nonregressionPixelsMeetOpenJPEGTolerances(name: String) async throws {
         guard let root = Conformance.root() else { return }
         let input = root.appendingPathComponent("input/conformance/\(name).j2c")
         let baselineDirectory = root.appendingPathComponent("baseline/conformance")
         let bytes = Array(try Data(contentsOf: input))
-        let image = try decoder.decodeComponents(bytes)
+        let image = try await decoder.decodeComponents(bytes)
         var context = DecodeContext(limits: decoder.limits)
         let origin = try MainHeaderParser.parse(bytes, range: 0..<bytes.count, context: &context).geometry
         let paths = name == "a6_mono_colr"

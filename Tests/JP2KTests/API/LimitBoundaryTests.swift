@@ -37,7 +37,7 @@ struct LimitBoundaryTests {
         }
     }
 
-    @Test func tileLayerAndMarkerLimits() throws {
+    @Test func tileLayerAndMarkerLimits() async throws {
         let bytes = try fixture("tileparts.j2k")
         var context = DecodeContext(limits: Limits())
         let header = try MainHeaderParser.parse(bytes, range: 0..<bytes.count, context: &context)
@@ -53,10 +53,10 @@ struct LimitBoundaryTests {
             #expect(value > 0)
             var limits = Limits()
             set(&limits, value)
-            _ = try JP2KDecoder(limits: limits).decodeComponents(bytes)
+            _ = try await JP2KDecoder(limits: limits).decodeComponents(bytes)
             set(&limits, value - 1)
-            #expect(throws: JP2KError.limitExceeded(kind)) {
-                _ = try JP2KDecoder(limits: limits).decodeComponents(bytes)
+            await #expect(throws: JP2KError.limitExceeded(kind)) {
+                _ = try await JP2KDecoder(limits: limits).decodeComponents(bytes)
             }
         }
     }
@@ -148,19 +148,19 @@ struct LimitBoundaryTests {
         #expect(passes <= limits.maxCodingPasses)
     }
 
-    @Test func workLimits() throws {
+    @Test func workLimits() async throws {
         let bytes = try fixture("levels-0.j2k")
-        let measured = try JP2KDecoder().decodeComponentsWithMetrics(bytes)
+        let measured = try await JP2KDecoder().decodeComponentsWithMetrics(bytes)
         // Memory: the recorded peak includes allocator rounding, which varies
         // by platform, so the exact one-byte boundary is not portable. Pin it
         // with a margin instead: the measured peak passes and 90% of it fails
         // with .memory.
         var memoryLimits = Limits()
         memoryLimits.maxMemoryBytes = measured.1.peakMemoryBytes
-        _ = try JP2KDecoder(limits: memoryLimits).decodeComponents(bytes)
+        _ = try await JP2KDecoder(limits: memoryLimits).decodeComponents(bytes)
         memoryLimits.maxMemoryBytes = measured.1.peakMemoryBytes / 10 * 9
-        #expect(throws: JP2KError.limitExceeded(.memory)) {
-            _ = try JP2KDecoder(limits: memoryLimits).decodeComponents(bytes)
+        await #expect(throws: JP2KError.limitExceeded(.memory)) {
+            _ = try await JP2KDecoder(limits: memoryLimits).decodeComponents(bytes)
         }
         let cases: [(JP2KError.Limit, Int, (inout Limits, Int) -> Void)] = [
             (.packets, measured.1.packets, { $0.maxPackets = $1 }),
@@ -171,15 +171,15 @@ struct LimitBoundaryTests {
             #expect(value > 0)
             var limits = Limits()
             set(&limits, value)
-            _ = try JP2KDecoder(limits: limits).decodeComponents(bytes)
+            _ = try await JP2KDecoder(limits: limits).decodeComponents(bytes)
             set(&limits, value - 1)
-            #expect(throws: JP2KError.limitExceeded(kind)) {
-                _ = try JP2KDecoder(limits: limits).decodeComponents(bytes)
+            await #expect(throws: JP2KError.limitExceeded(kind)) {
+                _ = try await JP2KDecoder(limits: limits).decodeComponents(bytes)
             }
         }
     }
 
-    @Test func measureFixtureAndConformanceCounters() throws {
+    @Test func measureFixtureAndConformanceCounters() async throws {
         guard ProcessInfo.processInfo.environment["JP2K_MEASURE_LIMITS"] == "1" else { return }
         let manifestURL = try #require(Fixtures.url("MANIFEST.sha256"))
         let manifest = try String(contentsOf: manifestURL, encoding: .utf8)
@@ -211,7 +211,7 @@ struct LimitBoundaryTests {
         limits.maxMarkerDataBytes = Int.max
         let decoder = JP2KDecoder(limits: limits)
         for (name, bytes) in sources {
-            let measured = try decoder.decodeComponentsWithMetrics(bytes).1
+            let measured = try await decoder.decodeComponentsWithMetrics(bytes).1
             var context = DecodeContext(limits: limits)
             let range: Range<Int>
             if name.hasSuffix(".jp2") { range = try JP2Parser.parse(bytes, context: &context).codestream }

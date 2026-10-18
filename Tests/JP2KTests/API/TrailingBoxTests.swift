@@ -27,12 +27,12 @@ struct TrailingBoxTests {
     }
 
     @Test(arguments: [false, true])
-    func boxAfterCodestreamIsIgnored(zeroLengthTilePart: Bool) throws {
+    func boxAfterCodestreamIsIgnored(zeroLengthTilePart: Bool) async throws {
         var stream = try fixture("gray-378x472-53.j2k")
         if zeroLengthTilePart { stream = try zeroPsot(stream) }
-        let expected = try JP2KDecoder().decodeComponents(stream).components
+        let expected = try await JP2KDecoder().decodeComponents(stream).components
         let trailing = BoxWriter.box("xml ", Array("<x/>".utf8))
-        let decoded = try JP2KDecoder().decodeComponents(jp2(stream, trailing: trailing)).components
+        let decoded = try await JP2KDecoder().decodeComponents(jp2(stream, trailing: trailing)).components
         #expect(decoded == expected)
     }
 }
