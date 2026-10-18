@@ -12,7 +12,7 @@ Part 2, HTJ2K, component precision above 16 bits, reduced-resolution decoding, a
 
 ## Use
 
-Requires Swift 6.4 or later. Add this repository as a Swift package dependency and import `JP2K`:
+Requires Swift 6.4 or later; on Apple platforms, macOS 26, iOS 26, tvOS 26, watchOS 26 or visionOS 26 (the Tier-1 loops use `MutableSpan`). Add this repository as a Swift package dependency and import `JP2K`:
 
 ```swift
 import Foundation
@@ -70,18 +70,18 @@ Apple Silicon release build, `swift run -c release jp2k-bench`: five warm-ups an
 
 | Input | JP2K | ImageIO |
 | --- | ---: | ---: |
-| Gray 378×472, lossless 5/3 | 5.9 | 20.6 |
-| Gray 378×472, lossy 9/7 | 2.4 | 2.0 |
-| RGB 64×64, lossless | 2.2 | 1.5 |
-| RGB 64×64, lossy | 0.23 | 0.27 |
-| `file2.jp2`, 480×640 sYCC | 25.7 | 65.3 |
-| `p0_07.j2k`, 2048×2048 | 262 | 1,137 |
+| Gray 378×472, lossless 5/3 | 5.3 | 20.1 |
+| Gray 378×472, lossy 9/7 | 2.4 | 1.9 |
+| RGB 64×64, lossless | 1.7 | 1.4 |
+| RGB 64×64, lossy | 0.23 | 0.26 |
+| `file2.jp2`, 480×640 sYCC | 25.0 | 65.3 |
+| `p0_07.j2k`, 2048×2048 | 240 | 1,146 |
 
 The two conformance rows need `JP2K_CONFORMANCE_DIR`.
 
 Up to `maxThreads` child tasks share the work: an image with several tiles reconstructs one tile per task (packet headers are still read in order first), and a single-tile image splits its code-blocks across tasks. Images and tiles with fewer than 32,768 samples stay on one thread. The output is identical for every thread count, and the same input fails with the same error. Each task's working memory is reserved from `maxMemoryBytes` first; if it does not fit, or a task outgrows it, decoding falls back to one thread.
 
-JP2K is about 3× faster than ImageIO on the gray lossless image, about 2.5× faster on the sYCC image and about 4× faster on the 2048×2048 image. ImageIO stays ahead on the small lossy and RGB cases, where fixed per-image costs dominate. `p0_07.j2k` has 256 tiles of 128×128, which are reconstructed concurrently; on one thread it takes about 1.6 s. A Linux aarch64 Docker run on the same machine measured 10.4 ms (lossless) and 3.0 ms (lossy) for the gray image; Windows timings are printed by CI.
+JP2K is about 3.8× faster than ImageIO on the gray lossless image, about 2.6× faster on the sYCC image and about 4.8× faster on the 2048×2048 image. ImageIO stays ahead on the small lossy and RGB cases, where fixed per-image costs dominate. `p0_07.j2k` has 256 tiles of 128×128, which are reconstructed concurrently; on one thread it takes about 1.45 s. A Linux aarch64 Docker run on the same machine measured 10.4 ms (lossless) and 3.0 ms (lossy) for the gray image; Windows timings are printed by CI.
 
 ## Testing
 

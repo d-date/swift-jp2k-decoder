@@ -142,22 +142,29 @@ struct MQDecoder {
         guard context >= 0, context < Self.contextCount else { return 0 }
         let state = T1Tables.states[Int(states[context])]
         let qeval = UInt32(state.qeval)
-        a -= qeval
-        if c >> 16 < qeval {
-            // LPS exchange: the smaller interval decides which symbol was coded.
-            let mps = a < qeval
-            a = qeval
-            states[context] = mps ? state.nmps : state.nlps
-            renormalize()
-            return mps ? Int(state.mps) : 1 - Int(state.mps)
+        // A stays at least 0x8000 between symbols and Qe is at most 0x5601.
+        let interval = a &- qeval
+        let lpsPath = c >> 16 < qeval
+        if !lpsPath && interval & 0x8000 != 0 {
+            a = interval
+            c &-= qeval << 16
+            return Int(state.mps)
         }
-        c -= qeval << 16
-        if a & 0x8000 != 0 { return Int(state.mps) }
-        // MPS exchange.
-        let lps = a < qeval
-        states[context] = lps ? state.nlps : state.nmps
+        // Both exchanges of opj_mqc_decode, without branching on the
+        // (unpredictable) outcome: in the LPS path the symbol is the MPS when
+        // the remaining interval is smaller than Qe, in the MPS path when it
+        // is not; the state follows whichever symbol came out.
+        let exchanged = interval < qeval
+        let symbol = Int(state.mps) ^ (exchanged == lpsPath ? 0 : 1)
+        states[context] = symbol == Int(state.mps) ? state.nmps : state.nlps
+        if lpsPath {
+            a = qeval
+        } else {
+            a = interval
+            c &-= qeval << 16
+        }
         renormalize()
-        return lps ? 1 - Int(state.mps) : Int(state.mps)
+        return symbol
     }
 
     @inline(__always) private func byte(at index: Int) -> UInt8 {
@@ -195,6 +202,15 @@ struct MQDecoder {
     }
 
     @inline(__always) private mutating func renormalize() {
+        // A is in 1..<0x8000 here. While no byte is due, the doubling loop is
+        // one shift by the distance to 0x8000.
+        let shift = a.leadingZeroBitCount - 16
+        if shift <= ct {
+            a <<= UInt32(shift)
+            c <<= UInt32(shift)
+            ct -= shift
+            return
+        }
         repeat {
             if ct == 0 { byteIn() }
             a <<= 1

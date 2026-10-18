@@ -156,3 +156,139 @@ import Testing
     #expect(T1Tables.zeroCoding.allSatisfy { $0 < 19 })
     #expect(T1Tables.signCoding.allSatisfy { $0 < 19 })
 }
+
+@Test func mqSkewedSourcesRoundTripThroughEveryState() {
+    // Per-context probabilities from 1/2 down to 1/4096 walk the
+    // probability states down to the smallest Qe and back on LPS hits.
+    var encoder = MQEncoder()
+    var seed: UInt32 = 0x9E37_79B9
+    var symbols: [(Int, Int)] = []
+    for index in 0..<60_000 {
+        seed = seed &* 1_664_525 &+ 1_013_904_223
+        let context = index % 19
+        let skew = UInt32(1) << (context % 13)
+        let bit = (seed >> 8) % (skew * 2) == 0 ? 1 : 0
+        encoder.encode(bit, context: context)
+        symbols.append((context, bit))
+    }
+    let bytes = encoder.flush()
+    var decoder = MQDecoder.testing(data: bytes, segmentLengths: [bytes.count])
+    var mismatches = 0
+    for (context, bit) in symbols where decoder.decode(context: context) != bit { mismatches += 1 }
+    #expect(mismatches == 0)
+}
+
+/// opj_mqc_decode / opj_mqc_renormd / opj_mqc_bytein written out literally,
+/// with a bit-at-a-time renormalisation, as the reference for MQDecoder.
+private struct ReferenceMQ {
+    let data: [UInt8]
+    var position = 0
+    var a: UInt32 = 0x8000
+    var c: UInt32 = 0
+    var ct = 0
+    var states = [Int](repeating: 0, count: 19)
+
+    init(_ data: [UInt8]) {
+        self.data = data
+        states[18] = 46 * 2
+        states[17] = 3 * 2
+        states[0] = 4 * 2
+        c = UInt32(byte(0)) << 16
+        byteIn()
+        c <<= 7
+        ct -= 7
+    }
+
+    func byte(_ index: Int) -> UInt8 { index < data.count ? data[index] : 0xFF }
+
+    mutating func byteIn() {
+        if byte(position) == 0xFF {
+            if byte(position + 1) > 0x8F {
+                c &+= 0xFF00
+                ct = 8
+            } else {
+                position += 1
+                c &+= UInt32(byte(position)) << 9
+                ct = 7
+            }
+        } else {
+            position += 1
+            c &+= UInt32(byte(position)) << 8
+            ct = 8
+        }
+    }
+
+    mutating func renormalize() {
+        repeat {
+            if ct == 0 { byteIn() }
+            a <<= 1
+            c <<= 1
+            ct -= 1
+        } while a < 0x8000
+    }
+
+    mutating func decode(_ context: Int) -> Int {
+        let state = T1Tables.states[states[context]]
+        let qeval = UInt32(state.qeval)
+        a -= qeval
+        let symbol: Int
+        if c >> 16 < qeval {
+            if a < qeval {
+                a = qeval
+                symbol = Int(state.mps)
+                states[context] = Int(state.nmps)
+            } else {
+                a = qeval
+                symbol = 1 - Int(state.mps)
+                states[context] = Int(state.nlps)
+            }
+            renormalize()
+        } else {
+            c -= qeval << 16
+            if a & 0x8000 == 0 {
+                if a < qeval {
+                    symbol = 1 - Int(state.mps)
+                    states[context] = Int(state.nlps)
+                } else {
+                    symbol = Int(state.mps)
+                    states[context] = Int(state.nmps)
+                }
+                renormalize()
+            } else {
+                symbol = Int(state.mps)
+            }
+        }
+        return symbol
+    }
+}
+
+@Test func mqMatchesReferenceOnArbitraryBytes() {
+    // Random bytes, rich in 0xFF stuffing and markers, drive every branch:
+    // LPS and MPS exchanges, renormalisation across byte boundaries (ct
+    // reaching 0 mid-shift) and the synthetic 0xFF tail.
+    var seed: UInt32 = 0xC0FF_EE11
+    for trial in 0..<200 {
+        var bytes: [UInt8] = []
+        for _ in 0..<(16 + trial % 97) {
+            seed = seed &* 1_664_525 &+ 1_013_904_223
+            let roll = seed >> 24
+            bytes.append(roll < 40 ? 0xFF : roll < 60 ? UInt8(0x80 + (seed >> 8) % 0x20) : UInt8(truncatingIfNeeded: seed >> 11))
+        }
+        var reference = ReferenceMQ(bytes)
+        var decoder = MQDecoder.testing(data: bytes, segmentLengths: [bytes.count])
+        decoder.setState(context: 18, msb: 0, prob: 46)
+        decoder.setState(context: 17, msb: 0, prob: 3)
+        decoder.setState(context: 0, msb: 0, prob: 4)
+        var mismatch = false
+        for index in 0..<2_000 {
+            seed = seed &* 1_664_525 &+ 1_013_904_223
+            let context = Int((seed >> 16) % 19)
+            if decoder.decode(context: context) != reference.decode(context) {
+                Issue.record("trial \(trial): first difference at symbol \(index)")
+                mismatch = true
+                break
+            }
+        }
+        if mismatch { break }
+    }
+}

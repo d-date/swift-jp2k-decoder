@@ -123,6 +123,10 @@ struct CodeBlockDecoder: ~Copyable {
         swap(&working, &data)
         var workingFlags: [UInt32] = []
         swap(&workingFlags, &flags)
+        // The passes write through spans: bounds-checked like the arrays, but
+        // without the uniqueness check every write to an inout array pays.
+        var samples = working.mutableSpan
+        var flagWords = workingFlags.mutableSpan
         var mq = MQDecoder(paddedData: mqInput, dataCount: block.data.count, segments: block.segments)
         mq.resetStates()
         mq.setState(context: 18, msb: 0, prob: 46)
@@ -143,14 +147,14 @@ struct CodeBlockDecoder: ~Copyable {
                 case 0:
                     Self.significancePass(width: width, height: height, stride: stride, plane: plane,
                                      orientation: orientation, raw: raw, vcausal: vcausal,
-                                     mq: &mq, samples: &working, flags: &workingFlags)
+                                     mq: &mq, samples: &samples, flags: &flagWords)
                 case 1:
                     Self.refinementPass(width: width, height: height, stride: stride, plane: plane,
-                                        raw: raw, mq: &mq, samples: &working, flags: &workingFlags)
+                                        raw: raw, mq: &mq, samples: &samples, flags: &flagWords)
                 default:
                     Self.cleanupPass(width: width, height: height, stride: stride, plane: plane,
                                      orientation: orientation, vcausal: vcausal, mq: &mq,
-                                     samples: &working, flags: &workingFlags)
+                                     samples: &samples, flags: &flagWords)
                     if segsym {
                         // OpenJPEG consumes all four symbols and only warns on a mismatch.
                         for _ in 0..<4 { _ = mq.decode(context: 18) }
@@ -199,7 +203,7 @@ struct CodeBlockDecoder: ~Copyable {
     }
 
     @inline(__always) private static func mark(_ index: Int, row: Int, negative: Int, stride: Int,
-                                               vcausal: Bool = false, flags: inout [UInt32]) {
+                                               vcausal: Bool = false, flags: inout MutableSpan<UInt32>) {
         let shift = row * 3
         flags[index - 1] |= UInt32(1 << (5 + shift))
         flags[index] |= UInt32((1 << 4) | (negative << 19)) << shift
@@ -220,8 +224,8 @@ struct CodeBlockDecoder: ~Copyable {
 
     private static func significancePass(width: Int, height: Int, stride: Int, plane: Int,
                                          orientation: Int, raw: Bool = false, vcausal: Bool = false,
-                                         mq: inout MQDecoder, samples: inout [Int32],
-                                         flags: inout [UInt32]) {
+                                         mq: inout MQDecoder, samples: inout MutableSpan<Int32>,
+                                         flags: inout MutableSpan<UInt32>) {
         let magnitude = Int32((1 << plane) | (1 << (plane - 1)))
         for stripe in 0..<(height + 3) / 4 {
             let rows = min(4, height - stripe * 4)
@@ -250,8 +254,8 @@ struct CodeBlockDecoder: ~Copyable {
     }
 
     private static func refinementPass(width: Int, height: Int, stride: Int, plane: Int,
-                                       raw: Bool = false, mq: inout MQDecoder, samples: inout [Int32],
-                                       flags: inout [UInt32]) {
+                                       raw: Bool = false, mq: inout MQDecoder,
+                                       samples: inout MutableSpan<Int32>, flags: inout MutableSpan<UInt32>) {
         let half = Int32(1 << (plane - 1))
         for stripe in 0..<(height + 3) / 4 {
             let rows = min(4, height - stripe * 4)
@@ -267,8 +271,12 @@ struct CodeBlockDecoder: ~Copyable {
                     if (word & ((Self.sigma | Self.pi) << shift)) == (Self.sigma << shift) {
                         let bit = raw ? mq.rawDecode() :
                             mq.decode(context: T1Tables.magnitudeContext(flags: Int(word >> shift)))
+                        // Branch-free: the decoded bit is unpredictable. Moving away
+                        // from zero (bit set for a positive value, clear for a
+                        // negative one) adds half; otherwise it subtracts half.
                         let value = samples[offset]
-                        samples[offset] = (bit ^ (value < 0 ? 1 : 0)) != 0 ? value + half : value - half
+                        let away = Int32(bit) ^ (value >> 31) & 1
+                        samples[offset] = value &+ (half &* (away &* 2 &- 1))
                         word |= Self.mu << shift
                     }
                     offset += width
@@ -280,8 +288,8 @@ struct CodeBlockDecoder: ~Copyable {
 
     private static func cleanupPass(width: Int, height: Int, stride: Int, plane: Int,
                                     orientation: Int, vcausal: Bool = false,
-                                    mq: inout MQDecoder, samples: inout [Int32],
-                                    flags: inout [UInt32]) {
+                                    mq: inout MQDecoder, samples: inout MutableSpan<Int32>,
+                                    flags: inout MutableSpan<UInt32>) {
         let magnitude = Int32((1 << plane) | (1 << (plane - 1)))
         for stripe in 0..<(height + 3) / 4 {
             let rows = min(4, height - stripe * 4)
