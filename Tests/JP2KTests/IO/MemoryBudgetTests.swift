@@ -11,9 +11,10 @@ import Testing
         _ = try budget.array(repeating: UInt8(0), count: Int.max)
     }
     #expect(budget.used == 0)
-    let values = try budget.array(repeating: UInt8(7), count: 100)
-    #expect(values.count == 100)
-    #expect(budget.used == 100)
+    // Allocator rounding is charged too, so allocate well inside the limit.
+    let values = try budget.array(repeating: UInt8(7), count: 50)
+    #expect(values.count == 50)
+    #expect(budget.used == values.capacity)
     budget.release(bytes: 150)
     #expect(budget.used == 0)
 }
@@ -111,4 +112,24 @@ import Testing
     #expect(limits.maxBitDepth == 16)
     limits.maxBitDepth = 8
     #expect(limits.maxBitDepth == 8)
+}
+
+@Test func budgetNeverRecordsMoreThanItsLimit() throws {
+    // Allocators may round a request up; that slack must still respect the
+    // limit, so every successful charge leaves `used` within it.
+    for limit in 1...96 {
+        for count in 1...64 {
+            var budget = MemoryBudget(limit: limit)
+            var values: [UInt8] = []
+            if (try? budget.append(contentsOf: repeatElement(UInt8(1), count: count), to: &values)) != nil {
+                #expect(budget.used <= limit)
+                #expect(budget.used == values.capacity)
+            }
+            var other = MemoryBudget(limit: limit)
+            if let array = try? other.array(repeating: UInt8(0), count: count) {
+                #expect(other.used <= limit)
+                #expect(other.used == array.capacity)
+            }
+        }
+    }
 }

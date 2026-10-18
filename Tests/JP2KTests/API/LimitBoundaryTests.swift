@@ -151,10 +151,10 @@ struct LimitBoundaryTests {
     @Test func workLimits() throws {
         let bytes = try fixture("levels-0.j2k")
         let measured = try JP2KDecoder().decodeComponentsWithMetrics(bytes)
-        // Memory: the recorded peak includes allocator rounding slack that is
-        // charged without a limit check, so the exact one-byte boundary is
-        // platform-dependent. Pin it with a margin instead: the measured peak
-        // passes and 90% of it fails with .memory.
+        // Memory: the recorded peak includes allocator rounding, which varies
+        // by platform, so the exact one-byte boundary is not portable. Pin it
+        // with a margin instead: the measured peak passes and 90% of it fails
+        // with .memory.
         var memoryLimits = Limits()
         memoryLimits.maxMemoryBytes = measured.1.peakMemoryBytes
         _ = try JP2KDecoder(limits: memoryLimits).decodeComponents(bytes)

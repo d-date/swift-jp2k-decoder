@@ -23,7 +23,25 @@ struct MemoryBudget {
         let (size, didOverflow) = count.multipliedReportingOverflow(by: MemoryLayout<T>.stride)
         if didOverflow { throw .limitExceeded(.memory) }
         try reserve(bytes: size)
-        return [T](repeating: value, count: count)
+        let array = [T](repeating: value, count: count)
+        do {
+            try chargeSlack(actualBytes: array.capacity &* MemoryLayout<T>.stride, requestedBytes: size)
+        } catch {
+            release(bytes: size)
+            throw error
+        }
+        return array
+    }
+
+    /// Allocators may round a request up (e.g. malloc_size, glibc usable size).
+    /// The rounding is charged like any other byte so `used` never exceeds
+    /// `limit`; an unused part of the request is released.
+    private mutating func chargeSlack(actualBytes: Int, requestedBytes: Int) throws(JP2KError) {
+        if actualBytes > requestedBytes {
+            try reserve(bytes: actualBytes - requestedBytes)
+        } else if actualBytes < requestedBytes {
+            release(bytes: requestedBytes - actualBytes)
+        }
     }
 
     /// The caller must pass uniquely owned storage. Charges both buffers while growing.
@@ -44,17 +62,16 @@ struct MemoryBudget {
             // The limit is enforced on the requested capacity before anything
             // changes, so a failure leaves both `used` and `array` untouched.
             try reserve(bytes: newBytes)
-            array.reserveCapacity(target)
-            // Allocators may round the capacity up (e.g. glibc usable size);
-            // that slack is not input-amplifiable, so it is recorded without a
-            // limit check to keep `used` equal to live capacity bytes.
-            let actualBytes = array.capacity &* stride
-            if actualBytes > newBytes {
-                used = used.addingReportingOverflow(actualBytes - newBytes).overflow ? Int.max : used + (actualBytes - newBytes)
-                peak = max(peak, used)
-            } else if actualBytes < newBytes {
-                release(bytes: newBytes - actualBytes)
+            var grown = array
+            grown.reserveCapacity(target)
+            do {
+                try chargeSlack(actualBytes: grown.capacity &* stride, requestedBytes: newBytes)
+            } catch {
+                // Dropping `grown` frees the new storage; `array` is untouched.
+                release(bytes: newBytes)
+                throw error
             }
+            array = grown
             release(bytes: oldBytes)
         }
         array.append(contentsOf: elements)
