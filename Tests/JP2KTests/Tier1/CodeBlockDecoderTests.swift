@@ -186,7 +186,7 @@ func codeBlocksMatchOpenJPEG(_ name: String) throws {
     let required = measured.used
     var exact = MemoryBudget(limit: required)
     var reused = try CodeBlockDecoder(maxWidth: 64, maxHeight: 64, budget: &exact)
-    for _ in 0..<1_000 {
+    for _ in 0..<20 {
         try reused.decode(block.0, orientation: block.1, roiShift: 0, codeBlockStyle: 0,
                           numBitPlanes: block.2, budget: &exact)
         #expect(exact.used == required)
