@@ -91,71 +91,86 @@ enum ColorConverter {
         // interleaved pixel buffer is allocated and charged to the budget.
         let count = try Checked.mul(try Checked.mul(crop.2, crop.3), channelCount)
         var pixels = try context.budget.array(repeating: UInt8(0), count: count)
-        if sycc {
-            try convertSYCC(image, order: order, mapping: mapping, palette: palette, crop: crop,
-                            channelCount: channelCount, referenceOrigin: referenceOrigin, pixels: &pixels)
-        } else if crop.2 > 0 && crop.3 > 0 {
+        if crop.2 > 0 && crop.3 > 0 {
             var planes: [ChannelPlane] = []
             // Declared before the planes are built so a later channel's
             // failure still returns the tables of the earlier ones.
             defer { for plane in planes { context.budget.release(bytes: plane.tableBytes) } }
-            for channel in 0..<channelCount {
-                planes.append(try ChannelPlane(order[channel], image: image, mapping: mapping, palette: palette,
+            if sycc {
+                // Built in the order the per-pixel conversion reads them
+                // (Y, Cb, Cr, alpha), so the first failing check is the same.
+                planes.append(try ChannelPlane(order[0], image: image, mapping: mapping, palette: palette,
                                                crop: crop, referenceOrigin: referenceOrigin,
                                                budget: &context.budget))
-            }
-            for channel in 0..<channelCount {
-                let plane = planes[channel]
-                for row in 0..<crop.3 {
-                    let rowOffset = plane.rows[row]
-                    var target = row * crop.2 * channelCount + channel
-                    for column in 0..<crop.2 {
-                        pixels[target] = plane.value(at: rowOffset + plane.columns[column])
-                        target += channelCount
-                    }
+                for channel in order[1...2] {
+                    planes.append(try ChannelPlane(chroma: channel, luma: order[0], image: image, mapping: mapping,
+                                                   palette: palette, crop: crop, referenceOrigin: referenceOrigin,
+                                                   budget: &context.budget))
                 }
+                if channelCount == 4 {
+                    planes.append(try ChannelPlane(order[3], image: image, mapping: mapping, palette: palette,
+                                                   crop: crop, referenceOrigin: referenceOrigin,
+                                                   budget: &context.budget))
+                }
+                let depth = try channelFormat(order[0], image: image, mapping: mapping, palette: palette).precision
+                convertSYCC(planes, depth: depth, width: crop.2, height: crop.3, pixels: &pixels)
+            } else {
+                for channel in 0..<channelCount {
+                    planes.append(try ChannelPlane(order[channel], image: image, mapping: mapping, palette: palette,
+                                                   crop: crop, referenceOrigin: referenceOrigin,
+                                                   budget: &context.budget))
+                }
+                interleave(planes, width: crop.2, height: crop.3, pixels: &pixels)
             }
         }
         return PixelImage(width: crop.2, height: crop.3, format: format, pixels: pixels,
                           colorWasInferred: inferred, maxMemoryBytes: context.limits.maxMemoryBytes)
     }
 
-    /// Per-pixel path for sYCC, whose chroma layout depends on the luma
-    /// channel chosen by cdef; it is rare enough not to need lookup tables.
-    private static func convertSYCC(_ image: ComponentImage, order: [Int], mapping: [ComponentMapping]?,
-                                    palette: PaletteBox?, crop: (Int, Int, Int, Int), channelCount: Int,
-                                    referenceOrigin: (Int, Int), pixels: inout [UInt8]) throws(JP2KError) {
-        for row in 0..<crop.3 {
-            let y = try Checked.add(crop.1, row)
-            let rowBase = try Checked.mul(Checked.mul(row, crop.2), channelCount)
-            for column in 0..<crop.2 {
-                let x = try Checked.add(crop.0, column)
-                let base = try Checked.add(rowBase, Checked.mul(column, channelCount))
-                let yValue = try channelValue(order[0], atX: x, y: y, image: image, mapping: mapping, palette: palette,
-                                              referenceOrigin: referenceOrigin)
-                let cb = try syccChroma(order[1], luma: order[0], atX: x, y: y, image: image, mapping: mapping,
-                                        palette: palette, referenceOrigin: referenceOrigin)
-                let cr = try syccChroma(order[2], luma: order[0], atX: x, y: y, image: image, mapping: mapping,
-                                        palette: palette, referenceOrigin: referenceOrigin)
-                let depth = try channelFormat(order[0], image: image, mapping: mapping, palette: palette).precision
-                let rgb = syccToRGB(yValue.0, cb.0, cr.0, depth: depth)
-                pixels[base] = scale(rgb.0, precision: depth, signed: false)
-                pixels[base + 1] = scale(rgb.1, precision: depth, signed: false)
-                pixels[base + 2] = scale(rgb.2, precision: depth, signed: false)
-                if channelCount == 4 {
-                    let alpha = try channelValue(order[3], atX: x, y: y, image: image, mapping: mapping, palette: palette,
-                                                 referenceOrigin: referenceOrigin)
-                    pixels[base + 3] = scale(alpha.0, precision: alpha.1, signed: alpha.2)
+    private static func interleave(_ planes: [ChannelPlane], width: Int, height: Int, pixels: inout [UInt8]) {
+        let channelCount = planes.count
+        for channel in 0..<channelCount {
+            let plane = planes[channel]
+            for row in 0..<height {
+                let rowOffset = plane.rows[row]
+                var target = row * width * channelCount + channel
+                for column in 0..<width {
+                    pixels[target] = plane.value(at: rowOffset + plane.columns[column])
+                    target += channelCount
                 }
             }
         }
     }
 
+    /// sycc_to_rgb over the Y, Cb, Cr (and alpha) planes, whose tables
+    /// were validated when built, so the loop cannot fail.
+    private static func convertSYCC(_ planes: [ChannelPlane], depth: Int, width: Int, height: Int,
+                                    pixels: inout [UInt8]) {
+        let colour = ChannelScale(precision: depth, signed: false)
+        let channelCount = planes.count
+        var target = 0
+        for row in 0..<height {
+            for column in 0..<width {
+                let rgb = syccToRGB(planes[0].sample(row: row, column: column),
+                                    planes[1].sample(row: row, column: column),
+                                    planes[2].sample(row: row, column: column), depth: depth)
+                pixels[target] = colour.apply(rgb.0)
+                pixels[target + 1] = colour.apply(rgb.1)
+                pixels[target + 2] = colour.apply(rgb.2)
+                if channelCount == 4 {
+                    pixels[target + 3] = planes[3].scale.apply(planes[3].sample(row: row, column: column))
+                }
+                target += channelCount
+            }
+        }
+    }
+
     /// One output channel resolved up front: its source plane, the source
-    /// column for each output column and the row offset for each output row
-    /// (both clamped to the component grid as channelValue does), the palette
-    /// column if cmap maps through pclr, and its 8-bit scale. Building it
-    /// validates everything the per-pixel loop would, so the loop cannot fail.
+    /// column for each output column and the row offset for each output row,
+    /// the palette column if cmap maps through pclr, and its 8-bit scale.
+    /// A negative table entry reads as a zero sample (sYCC chroma edges).
+    /// Building it validates everything a per-pixel lookup would, so the
+    /// loops that read it cannot fail.
     private struct ChannelPlane {
         let samples: [Int32]
         let columns: [Int]
@@ -163,15 +178,89 @@ enum ColorConverter {
         let palette: [Int32]?
         let scale: ChannelScale
         let tableBytes: Int
+        /// 4:2:0 chroma whose luma starts on an odd x: output column 0 reads
+        /// zero on rows whose low bit equals this (each pair's first row).
+        let leadingZeroParity: Int?
 
+        /// Upsamples by repeating each component sample over its dx × dy
+        /// reference grid cell, clamped to the component edges.
         init(_ channel: Int, image: ComponentImage, mapping: [ComponentMapping]?, palette: PaletteBox?,
              crop: (Int, Int, Int, Int), referenceOrigin: (Int, Int),
              budget: inout MemoryBudget) throws(JP2KError) {
+            try self.init(channel, image: image, mapping: mapping, palette: palette, crop: crop,
+                          leadingZeroParity: nil, mayBeEmpty: false, budget: &budget,
+                          column: { column, descriptor throws(JP2KError) in
+                              let absolute = try Checked.add(Checked.add(crop.0, column), referenceOrigin.0)
+                              let position = try Checked.sub(Checked.ceilDiv(absolute, descriptor.dx), descriptor.x0)
+                              return min(max(0, position), descriptor.width - 1)
+                          },
+                          row: { row, descriptor throws(JP2KError) in
+                              let absolute = try Checked.add(Checked.add(crop.1, row), referenceOrigin.1)
+                              let position = try Checked.sub(Checked.ceilDiv(absolute, descriptor.dy), descriptor.y0)
+                              return min(max(0, position), descriptor.height - 1) * descriptor.width
+                          })
+        }
+
+        /// sYCC chroma. `luma` is the channel that cdef placed first:
+        /// OpenJPEG converts sYCC after cdef has reordered the components,
+        /// so the 4:2:2 / 4:2:0 layout is judged against that channel, not
+        /// the codestream's component 0. Other layouts upsample as usual.
+        init(chroma channel: Int, luma lumaChannel: Int, image: ComponentImage, mapping: [ComponentMapping]?,
+             palette: PaletteBox?, crop: (Int, Int, Int, Int), referenceOrigin: (Int, Int),
+             budget: inout MemoryBudget) throws(JP2KError) {
+            let source = try sourceComponent(channel, mapping: mapping)
+            let lumaSource = try sourceComponent(lumaChannel, mapping: mapping)
+            let count = image.info.components.count
+            if source < 0 || source >= count || lumaSource < 0 || lumaSource >= count {
+                throw .invalidContainer(.badComponentMapping)
+            }
+            let luma = image.info.components[lumaSource]
+            let chroma = image.info.components[source]
+            guard luma.dx == 1, luma.dy == 1, chroma.dx == 2, chroma.dy == 1 || chroma.dy == 2 else {
+                try self.init(channel, image: image, mapping: mapping, palette: palette, crop: crop,
+                              referenceOrigin: referenceOrigin, budget: &budget)
+                return
+            }
+            // sycc422_to_rgb / sycc420_to_rgb walk the component grids
+            // directly, so positions here are image coordinates; an odd
+            // leading edge reads as zero chroma. A single luma column or
+            // row on an odd origin leaves the chroma with no samples at
+            // all, and every pixel then takes that zero path.
+            let offx = luma.x0 & 1
+            let offy = chroma.dy == 2 ? luma.y0 & 1 : 0
+            let halfRows = chroma.dy == 2
+            try self.init(channel, image: image, mapping: mapping, palette: palette, crop: crop,
+                          leadingZeroParity: halfRows && crop.0 < offx ? try Checked.sub(crop.1, offy) & 1 : nil,
+                          mayBeEmpty: true, budget: &budget,
+                          column: { column, descriptor throws(JP2KError) in
+                              let x = try Checked.add(crop.0, column)
+                              // 4:2:2 zeroes the whole leading column; 4:2:0
+                              // only on each pair's first row (leadingZeroParity)
+                              // and reads chroma column 0 on the others.
+                              if x < offx && !halfRows { return -1 }
+                              let position = x < offx ? 0 : try Checked.sub(x, offx) / 2
+                              return position < descriptor.width ? position : -1
+                          },
+                          row: { row, descriptor throws(JP2KError) in
+                              let y = try Checked.add(crop.1, row)
+                              if y < offy { return -1 }
+                              let position = halfRows ? try Checked.sub(y, offy) / 2 : y
+                              return position < descriptor.height ? try Checked.mul(position, descriptor.width) : -1
+                          })
+        }
+
+        private init(_ channel: Int, image: ComponentImage, mapping: [ComponentMapping]?, palette: PaletteBox?,
+                     crop: (Int, Int, Int, Int), leadingZeroParity: Int?, mayBeEmpty: Bool,
+                     budget: inout MemoryBudget,
+                     column: (Int, ComponentInfo) throws(JP2KError) -> Int,
+                     row: (Int, ComponentInfo) throws(JP2KError) -> Int) throws(JP2KError) {
             let source = try sourceComponent(channel, mapping: mapping)
             guard source >= 0, source < image.components.count,
                   source < image.info.components.count else { throw .invalidContainer(.badComponentMapping) }
             let descriptor = image.info.components[source]
-            guard descriptor.width > 0, descriptor.height > 0 else { throw .invalidCodestream(.badSIZ) }
+            guard mayBeEmpty || (descriptor.width > 0 && descriptor.height > 0) else {
+                throw .invalidCodestream(.badSIZ)
+            }
             guard try Checked.mul(descriptor.width, descriptor.height) <= image.components[source].count else {
                 throw .invalidCodestream(.badSIZ)
             }
@@ -185,6 +274,7 @@ enum ColorConverter {
             }
             let format = try channelFormat(channel, image: image, mapping: mapping, palette: palette)
             scale = ChannelScale(precision: format.precision, signed: format.signed)
+            self.leadingZeroParity = leadingZeroParity
             var columns = try budget.array(repeating: 0, count: crop.2)
             var rows: [Int]
             do {
@@ -195,16 +285,8 @@ enum ColorConverter {
             }
             tableBytes = (columns.capacity + rows.capacity) * MemoryLayout<Int>.stride
             do {
-                for column in columns.indices {
-                    let absolute = try Checked.add(Checked.add(crop.0, column), referenceOrigin.0)
-                    let position = try Checked.sub(Checked.ceilDiv(absolute, descriptor.dx), descriptor.x0)
-                    columns[column] = min(max(0, position), descriptor.width - 1)
-                }
-                for row in rows.indices {
-                    let absolute = try Checked.add(Checked.add(crop.1, row), referenceOrigin.1)
-                    let position = try Checked.sub(Checked.ceilDiv(absolute, descriptor.dy), descriptor.y0)
-                    rows[row] = min(max(0, position), descriptor.height - 1) * descriptor.width
-                }
+                for index in columns.indices { columns[index] = try column(index, descriptor) }
+                for index in rows.indices { rows[index] = try row(index, descriptor) }
             } catch {
                 budget.release(bytes: tableBytes)
                 throw error
@@ -214,10 +296,22 @@ enum ColorConverter {
             samples = image.components[source]
         }
 
-        @inline(__always) func value(at index: Int) -> UInt8 {
+        /// Sample at a table index, through the palette when there is one.
+        @inline(__always) func raw(at index: Int) -> Int {
             let value = Int(samples[index])
-            guard let palette else { return scale.apply(value) }
-            return scale.apply(Int(palette[min(max(0, value), palette.count - 1)]))
+            guard let palette else { return value }
+            return Int(palette[min(max(0, value), palette.count - 1)])
+        }
+
+        @inline(__always) func value(at index: Int) -> UInt8 { scale.apply(raw(at: index)) }
+
+        /// Sample for an output position, honouring zero-chroma entries.
+        func sample(row: Int, column: Int) -> Int {
+            let offset = rows[row]
+            let position = columns[column]
+            if offset < 0 || position < 0 { return 0 }
+            if column == 0, let parity = leadingZeroParity, row & 1 == parity { return 0 }
+            return raw(at: offset + position)
         }
     }
 
@@ -288,86 +382,12 @@ enum ColorConverter {
         context.budget.release(bytes: try Checked.mul(channels.count, MemoryLayout<Int>.stride))
     }
 
-    private static func channelValue(_ channel: Int, atX x: Int, y: Int, image: ComponentImage,
-                                     mapping: [ComponentMapping]?, palette: PaletteBox?,
-                                     referenceOrigin: (Int, Int),
-                                     position: (Int, Int)? = nil) throws(JP2KError) -> (Int, Int, Bool) {
-        let source = try sourceComponent(channel, mapping: mapping)
-        if source < 0 || source >= image.components.count { throw .invalidContainer(.badComponentMapping) }
-        let descriptor = image.info.components[source]
-        let absoluteX = try Checked.add(x, referenceOrigin.0)
-        let absoluteY = try Checked.add(y, referenceOrigin.1)
-        let column: Int
-        let row: Int
-        if let position {
-            column = position.0
-            row = position.1
-        } else {
-            column = min(max(0, try Checked.sub(Checked.ceilDiv(absoluteX, descriptor.dx), descriptor.x0)), descriptor.width - 1)
-            row = min(max(0, try Checked.sub(Checked.ceilDiv(absoluteY, descriptor.dy), descriptor.y0)), descriptor.height - 1)
-        }
-        if column < 0 || row < 0 || column >= descriptor.width || row >= descriptor.height {
-            throw .invalidCodestream(.badSIZ)
-        }
-        let index = try Checked.add(try Checked.mul(row, descriptor.width), column)
-        if index >= image.components[source].count { throw .invalidCodestream(.badSIZ) }
-        var value = Int(image.components[source][index])
-        if let mapping, let palette, mapping[channel].mtyp == 1 {
-            if channel >= palette.entries.count || palette.entries[channel].isEmpty {
-                throw .invalidContainer(.badPalette)
-            }
-            value = Int(palette.entries[channel][min(max(0, value), palette.entries[channel].count - 1)])
-        }
-        let format = try channelFormat(channel, image: image, mapping: mapping, palette: palette)
-        return (value, format.precision, format.signed)
-    }
-
     /// Codestream component feeding output channel `channel` (through cmap
     /// when present); out-of-range channels are rejected instead of trapping.
     static func sourceComponent(_ channel: Int, mapping: [ComponentMapping]?) throws(JP2KError) -> Int {
         guard let mapping else { return channel }
         guard channel >= 0 && channel < mapping.count else { throw .invalidContainer(.badComponentMapping) }
         return mapping[channel].cmp
-    }
-
-    /// `luma` is the channel that cdef placed first: OpenJPEG converts sYCC
-    /// after cdef has reordered the components, so the 4:2:2 / 4:2:0 layout
-    /// is judged against that channel, not the codestream's component 0.
-    private static func syccChroma(_ channel: Int, luma lumaChannel: Int, atX x: Int, y: Int,
-                                   image: ComponentImage, mapping: [ComponentMapping]?, palette: PaletteBox?,
-                                   referenceOrigin: (Int, Int)) throws(JP2KError) -> (Int, Int, Bool) {
-        let source = try sourceComponent(channel, mapping: mapping)
-        let lumaSource = try sourceComponent(lumaChannel, mapping: mapping)
-        let count = image.info.components.count
-        if source < 0 || source >= count || lumaSource < 0 || lumaSource >= count {
-            throw .invalidContainer(.badComponentMapping)
-        }
-        let luma = image.info.components[lumaSource]
-        let chroma = image.info.components[source]
-        if luma.dx != 1 || luma.dy != 1 || chroma.dx != 2 || (chroma.dy != 1 && chroma.dy != 2) {
-            return try channelValue(channel, atX: x, y: y, image: image, mapping: mapping, palette: palette,
-                                    referenceOrigin: referenceOrigin)
-        }
-        let offx = luma.x0 & 1
-        let offy = chroma.dy == 2 ? luma.y0 & 1 : 0
-        // OpenJPEG's 4:2:2 and 4:2:0 paths use zero chroma at an odd leading edge.
-        let leadingX = x < offx && (chroma.dy == 1 || (y - offy) % 2 == 0)
-        if leadingX || y < offy { return (0, chroma.precision, false) }
-        let cx = x < offx ? 0 : (x - offx) / 2
-        let cy = chroma.dy == 2 ? (y - offy) / 2 : y
-        if cx < 0 || cy < 0 || cx >= chroma.width || cy >= chroma.height {
-            return (0, chroma.precision, false)
-        }
-        return try channelValue(channel, atX: x, y: y, image: image, mapping: mapping,
-                                palette: palette, referenceOrigin: referenceOrigin, position: (cx, cy))
-    }
-
-    private static func scale(_ value: Int, precision: Int, signed: Bool) -> UInt8 {
-        if precision < 1 || precision > 16 { return 0 }
-        let maximum = (1 << precision) - 1
-        let shifted = value + (signed ? 1 << (precision - 1) : 0)
-        let clipped = min(max(shifted, 0), maximum)
-        return UInt8((clipped * 255 + maximum / 2) / maximum)
     }
 
     private static func syccToRGB(_ y: Int, _ cb: Int, _ cr: Int, depth: Int) -> (Int, Int, Int) {

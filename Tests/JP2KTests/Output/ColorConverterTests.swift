@@ -54,6 +54,73 @@ struct ColorConverterTests {
         #expect(pixels.pixels == expected)
     }
 
+    @Test(arguments: [(1, 1, 2), (2, 2, 1), (2, 1, 3)])
+    func syccChromaWithNoSamplesReadsAsZero(chromaDY: Int, width: Int, height: Int) throws {
+        // One luma column (or row, for 4:2:0) on an odd origin leaves the
+        // subsampled chroma with no samples; OpenJPEG still converts the
+        // pixels, with zero chroma.
+        let y = ComponentInfo(x0: 1, y0: 1, width: width, height: height,
+                              dx: 1, dy: 1, precision: 8, isSigned: false)
+        let chromaWidth = (width + 2) / 2 - 1
+        let chromaHeight = chromaDY == 2 ? (height + 2) / 2 - 1 : height
+        let cb = ComponentInfo(x0: 1, y0: 1, width: chromaWidth, height: chromaHeight,
+                               dx: 2, dy: chromaDY, precision: 8, isSigned: false)
+        let info = ImageInfo(width: width, height: height, components: [y, cb, cb],
+                             colorSpace: .sYCC, isJP2Container: true)
+        let image = ComponentImage(info: info,
+                                   components: [[Int32](repeating: 128, count: width * height),
+                                                 [Int32](repeating: 128, count: chromaWidth * chromaHeight),
+                                                 [Int32](repeating: 128, count: chromaWidth * chromaHeight)],
+                                   iccProfile: nil)
+        var context = DecodeContext(limits: Limits())
+        let pixels = try ColorConverter.convert(image, header: nil, color: .container, region: nil,
+                                                referenceOrigin: (1, 1), context: &context)
+        #expect(pixels.pixels == [UInt8](repeating: 0, count: width * height * 3).enumerated().map { index, _ in
+            index % 3 == 1 ? 255 : 0
+        })
+    }
+
+    @Test(arguments: [(1, 0), (1, 1), (2, 0), (2, 1)])
+    func syccRegionsMatchTheFullImage(chromaDY: Int, lumaOrigin: Int) throws {
+        // Every sub-rectangle must equal the same crop of the full decode,
+        // so the zero-chroma edges follow image coordinates, not the region.
+        let width = 5, height = 4
+        let chromaWidth = (width + lumaOrigin + 1) / 2 - (lumaOrigin + 1) / 2
+        let chromaHeight = chromaDY == 2 ? (height + lumaOrigin + 1) / 2 - (lumaOrigin + 1) / 2 : height
+        let y = ComponentInfo(x0: lumaOrigin, y0: lumaOrigin, width: width, height: height,
+                              dx: 1, dy: 1, precision: 8, isSigned: false)
+        let cb = ComponentInfo(x0: (lumaOrigin + 1) / 2, y0: chromaDY == 2 ? (lumaOrigin + 1) / 2 : lumaOrigin,
+                               width: chromaWidth, height: chromaHeight,
+                               dx: 2, dy: chromaDY, precision: 8, isSigned: false)
+        let info = ImageInfo(width: width, height: height, components: [y, cb, cb],
+                             colorSpace: .sYCC, isJP2Container: true)
+        let chromaCount = chromaWidth * chromaHeight
+        let image = ComponentImage(info: info, components: [
+            (0..<(width * height)).map { Int32(40 + $0 * 9) },
+            (0..<chromaCount).map { Int32(90 + $0 * 13) },
+            (0..<chromaCount).map { Int32(160 - $0 * 11) },
+        ], iccProfile: nil)
+        func decode(_ region: Region?) throws -> PixelImage {
+            var context = DecodeContext(limits: Limits())
+            return try ColorConverter.convert(image, header: nil, color: .container, region: region,
+                                              referenceOrigin: (lumaOrigin, lumaOrigin), context: &context)
+        }
+        let full = try decode(nil).pixels
+        for top in 0..<height {
+            for left in 0..<width {
+                for bottom in (top + 1)...height {
+                    for right in (left + 1)...width {
+                        let cropped = try decode(.pixels(x: left, y: top, width: right - left, height: bottom - top))
+                        let expected = (top..<bottom).flatMap { row in
+                            full[((row * width + left) * 3)..<((row * width + right) * 3)]
+                        }
+                        #expect(cropped.pixels == expected, "region \(left),\(top) to \(right),\(bottom)")
+                    }
+                }
+            }
+        }
+    }
+
     @Test func unalignedReferenceOriginUpsamplesEachComponent() throws {
         let subsampled = ComponentInfo(x0: 1, y0: 0, width: 3, height: 1,
                                        dx: 2, dy: 1, precision: 8, isSigned: false)

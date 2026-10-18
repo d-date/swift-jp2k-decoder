@@ -51,7 +51,7 @@ The rows below map ported Swift symbols to the OpenJPEG v2.5.4 reference source.
 | Sources/JP2K/Transform/TileDecoder.swift | TileDecoder.decode | src/lib/openjp2/tcd.c, src/lib/openjp2/t1.c | opj_tcd_decode_tile, opj_tcd_t1_decode, opj_tcd_dwt_decode, opj_tcd_mct_decode, opj_tcd_dc_level_shift_decode, opj_t1_clbl_decode_processor |
 | Sources/JP2K/Tier1/CodeBlockScheduler.swift | CodeBlockScheduler.run, CodeBlockScheduler.runSerial, CodeBlockScheduler.runParallel, CodeBlockScheduler.store | src/lib/openjp2/t1.c | opj_t1_decode_cblks, opj_t1_clbl_decode_processor |
 | Sources/JP2K/Output/ComponentAssembler.swift | ComponentAssembler.assemble | src/lib/openjp2/j2k.c | opj_j2k_update_image_data |
-| Sources/JP2K/Output/ColorConverter.swift | ColorConverter.checkMapping, ColorConverter.channelValue | src/lib/openjp2/jp2.c | opj_jp2_check_color, opj_jp2_apply_pclr |
-| Sources/JP2K/Output/ColorConverter.swift | ColorConverter.channelValue | src/lib/openjp2/j2k.c | opj_j2k_update_image_data |
+| Sources/JP2K/Output/ColorConverter.swift | ColorConverter.checkMapping, ChannelPlane.init | src/lib/openjp2/jp2.c | opj_jp2_check_color, opj_jp2_apply_pclr |
+| Sources/JP2K/Output/ColorConverter.swift | ChannelPlane.init | src/lib/openjp2/j2k.c | opj_j2k_update_image_data |
 | Sources/JP2K/Output/ColorConverter.swift | ColorConverter.applyDefinitions | src/lib/openjp2/jp2.c | opj_jp2_apply_cdef |
-| Sources/JP2K/Output/ColorConverter.swift | ColorConverter.syccToRGB, ColorConverter.convert | src/bin/common/color.c | sycc444_to_rgb, sycc422_to_rgb, sycc420_to_rgb, sycc_to_rgb |
+| Sources/JP2K/Output/ColorConverter.swift | ColorConverter.syccToRGB, ColorConverter.convertSYCC, ChannelPlane.init(chroma:) | src/bin/common/color.c | sycc444_to_rgb, sycc422_to_rgb, sycc420_to_rgb, sycc_to_rgb |
