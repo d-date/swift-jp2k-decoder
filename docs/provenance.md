@@ -48,7 +48,7 @@ The rows below map ported Swift symbols to the OpenJPEG v2.5.4 reference source.
 | Sources/JP2K/Transform/InverseDWT.swift | InverseDWT.decode, inverse53, inverse97 | src/lib/openjp2/dwt.c | opj_dwt_decode, opj_idwt53_h, opj_idwt53_v, opj_dwt_decode_real, opj_v8dwt_decode |
 | Sources/JP2K/Transform/InverseMCT.swift | InverseMCT.decode | src/lib/openjp2/mct.c | opj_mct_decode, opj_mct_decode_real |
 | Sources/JP2K/Transform/InverseMCT.swift | InverseMCT.levelShift | src/lib/openjp2/tcd.c | opj_tcd_dc_level_shift_decode |
-| Sources/JP2K/Transform/TileDecoder.swift | TileDecoder.decode | src/lib/openjp2/tcd.c, src/lib/openjp2/t1.c | opj_tcd_decode_tile, opj_tcd_t1_decode, opj_tcd_dwt_decode, opj_tcd_mct_decode, opj_tcd_dc_level_shift_decode, opj_t1_clbl_decode_processor |
+| Sources/JP2K/Transform/TileDecoder.swift | TileDecoder.decode, TileDecoder.prepare, TileDecoder.reconstruct | src/lib/openjp2/tcd.c, src/lib/openjp2/t1.c | opj_tcd_decode_tile, opj_tcd_t1_decode, opj_tcd_dwt_decode, opj_tcd_mct_decode, opj_tcd_dc_level_shift_decode, opj_t1_clbl_decode_processor |
 | Sources/JP2K/Tier1/CodeBlockScheduler.swift | CodeBlockScheduler.run, CodeBlockScheduler.runSerial, CodeBlockScheduler.runParallel, CodeBlockScheduler.store | src/lib/openjp2/t1.c | opj_t1_decode_cblks, opj_t1_clbl_decode_processor |
 | Sources/JP2K/Output/ComponentAssembler.swift | ComponentAssembler.assemble | src/lib/openjp2/j2k.c | opj_j2k_update_image_data |
 | Sources/JP2K/Output/ColorConverter.swift | ColorConverter.checkMapping, ChannelPlane.init | src/lib/openjp2/jp2.c | opj_jp2_check_color, opj_jp2_apply_pclr |

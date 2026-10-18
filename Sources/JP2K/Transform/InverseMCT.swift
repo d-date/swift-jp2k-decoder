@@ -41,20 +41,20 @@
 // Ported from OpenJPEG v2.5.4: mct.c: opj_mct_decode, opj_mct_decode_real; tcd.c: opj_tcd_dc_level_shift_decode
 /// Inverse colour transform and final precision adjustment.
 enum InverseMCT {
-    static func decode(_ tile: inout TileGeometry, reversible: Bool) throws(JP2KError) {
-        guard tile.components.count >= 3 else { throw .invalidCodestream(.badCOD) }
-        let count = tile.components[0].coefficients.count
-        guard tile.components[1].coefficients.count == count,
-              tile.components[2].coefficients.count == count else { throw .invalidCodestream(.badCOD) }
+    static func decode(_ planes: inout [[Int32]], reversible: Bool) throws(JP2KError) {
+        guard planes.count >= 3 else { throw .invalidCodestream(.badCOD) }
+        let count = planes[0].count
+        guard planes[1].count == count,
+              planes[2].count == count else { throw .invalidCodestream(.badCOD) }
         for index in 0..<count {
-            let y = tile.components[0].coefficients[index]
-            let u = tile.components[1].coefficients[index]
-            let v = tile.components[2].coefficients[index]
+            let y = planes[0][index]
+            let u = planes[1][index]
+            let v = planes[2][index]
             if reversible {
                 let green = Int64(y) - ((Int64(u) + Int64(v)) >> 2)
-                tile.components[0].coefficients[index] = Int32(clamping: green + Int64(v))
-                tile.components[1].coefficients[index] = Int32(clamping: green)
-                tile.components[2].coefficients[index] = Int32(clamping: green + Int64(u))
+                planes[0][index] = Int32(clamping: green + Int64(v))
+                planes[1][index] = Int32(clamping: green)
+                planes[2][index] = Int32(clamping: green + Int64(u))
             } else {
                 let yf = Float(bitPattern: UInt32(bitPattern: y))
                 let uf = Float(bitPattern: UInt32(bitPattern: u))
@@ -63,9 +63,9 @@ enum InverseMCT {
                 let greenUTerm = uf * 0.34413
                 let greenVTerm = vf * 0.71414
                 let blueTerm = uf * 1.772
-                tile.components[0].coefficients[index] = Int32(bitPattern: (yf + redTerm).bitPattern)
-                tile.components[1].coefficients[index] = Int32(bitPattern: (yf - greenUTerm - greenVTerm).bitPattern)
-                tile.components[2].coefficients[index] = Int32(bitPattern: (yf + blueTerm).bitPattern)
+                planes[0][index] = Int32(bitPattern: (yf + redTerm).bitPattern)
+                planes[1][index] = Int32(bitPattern: (yf - greenUTerm - greenVTerm).bitPattern)
+                planes[2][index] = Int32(bitPattern: (yf + blueTerm).bitPattern)
             }
         }
     }

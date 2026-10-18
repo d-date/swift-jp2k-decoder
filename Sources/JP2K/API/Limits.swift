@@ -33,8 +33,9 @@ public struct Limits: Sendable, Equatable {
     public var maxPacketIterations: Int = 4_194_304
     public var maxCodingPasses: Int = 8_388_608
     public var maxMarkerDataBytes: Int = 8 << 20
-    /// Upper bound on workers used for Tier-1 decoding of one tile component;
-    /// 1 decodes serially. Output and errors are identical for every value.
+    /// Upper bound on concurrent workers: tiles of a multi-tile image, or the
+    /// code-blocks of a single tile; 1 decodes serially. Output and errors
+    /// are identical for every value.
     /// Workers are child tasks on the concurrency pool, which runs no more of
     /// them at once than there are available cores. Worker scratch comes out of
     /// `maxMemoryBytes`; when it does not fit, decoding falls back to one

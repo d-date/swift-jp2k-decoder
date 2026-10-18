@@ -91,12 +91,9 @@ struct CodeBlockSchedulerTests {
 
     // MARK: - Error order on synthetic jobs
 
-    /// A one-component 32x8 grid holding four 8x8 blocks side by side.
-    private func grid() -> TileGeometry {
-        TileGeometry(x0: 0, y0: 0, x1: 32, y1: 8, components: [
-            TileComponent(x0: 0, y0: 0, x1: 32, y1: 8, resolutions: [],
-                          coefficients: [Int32](repeating: 0, count: 32 * 8))
-        ])
+    /// A 32 × 8 coefficient plane holding four 8 × 8 blocks side by side.
+    private func grid() -> [Int32] {
+        [Int32](repeating: 0, count: 32 * 8)
     }
 
     enum Fault: Sendable { case none, decode, before, after }
@@ -119,11 +116,11 @@ struct CodeBlockSchedulerTests {
     }
 
     private func schedule(_ faults: [Fault], threads: Int) async -> JP2KError? {
-        var geometry = grid()
+        var plane = grid()
         var context = DecodeContext(limits: limits(threads: threads))
         let jobs = faults.enumerated().map { job($0.offset, $0.element) }
         do {
-            try await CodeBlockScheduler.run(jobs, geometry: &geometry, context: &context)
+            try await CodeBlockScheduler.run(jobs, plane: &plane, context: &context)
             return nil
         } catch {
             return error
@@ -157,10 +154,10 @@ struct CodeBlockSchedulerTests {
         for threads in [1, 3] {
             for (candidate, expected) in [(both, JP2KError.limitExceeded(.packets)),
                                           (decodeThenPlace, JP2KError.invalidCodestream(.badCodeBlock))] {
-                var geometry = grid()
+                var plane = grid()
                 var context = DecodeContext(limits: limits(threads: threads))
                 do {
-                    try await CodeBlockScheduler.run([candidate, job(1, .none)], geometry: &geometry, context: &context)
+                    try await CodeBlockScheduler.run([candidate, job(1, .none)], plane: &plane, context: &context)
                     Issue.record("expected \(expected) with \(threads) threads")
                 } catch {
                     #expect(error == expected, "\(threads) threads")

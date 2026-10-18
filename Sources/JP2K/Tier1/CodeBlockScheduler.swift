@@ -83,15 +83,17 @@ struct CodeBlockJob: Sendable {
 /// Results are merged in job order, so output and errors match the serial
 /// path exactly.
 enum CodeBlockScheduler {
-    static func run(_ jobs: [CodeBlockJob], geometry: inout TileGeometry,
+    /// Decodes `jobs`, which all belong to one component, into that
+    /// component's coefficient plane.
+    static func run(_ jobs: [CodeBlockJob], plane: inout [Int32],
                     context: inout DecodeContext) async throws(JP2KError) {
         guard !jobs.isEmpty else { return }
         let workers = try workerCount(for: jobs, limit: context.limits.maxThreads,
                                       threshold: context.limits.parallelSampleThreshold)
-        if workers > 1, try await runParallel(jobs, workers: workers, geometry: &geometry, context: &context) {
+        if workers > 1, try await runParallel(jobs, workers: workers, plane: &plane, context: &context) {
             return
         }
-        try runSerial(jobs, geometry: &geometry, budget: &context.budget)
+        try runSerial(jobs, plane: &plane, budget: &context.budget)
     }
 
     private static func workerCount(for jobs: [CodeBlockJob], limit: Int, threshold: Int) throws(JP2KError) -> Int {
@@ -110,14 +112,14 @@ enum CodeBlockScheduler {
         return (width, height)
     }
 
-    private static func runSerial(_ jobs: [CodeBlockJob], geometry: inout TileGeometry,
+    private static func runSerial(_ jobs: [CodeBlockJob], plane: inout [Int32],
                                   budget: inout MemoryBudget) throws(JP2KError) {
         let limits = scratchLimits(jobs)
         var decoder = try CodeBlockDecoder(maxWidth: limits.width, maxHeight: limits.height, budget: &budget)
         do {
             for job in jobs {
                 try decode(job, with: &decoder, budget: &budget)
-                try store(job, from: decoder, into: &geometry)
+                try store(job, from: decoder, into: &plane)
             }
         } catch {
             decoder.release(from: &budget)
@@ -140,24 +142,23 @@ enum CodeBlockScheduler {
 
     /// Index of the block's first coefficient, after checking with Checked
     /// arithmetic that every row it writes lies inside the component plane.
-    private static func firstTarget(_ job: CodeBlockJob, in geometry: borrowing TileGeometry) throws(JP2KError) -> Int {
-        guard geometry.components.indices.contains(job.component),
-              job.width >= 0, job.height >= 0, job.offsetX >= 0, job.offsetY >= 0,
+    private static func firstTarget(_ job: CodeBlockJob, in plane: borrowing [Int32]) throws(JP2KError) -> Int {
+        guard job.width >= 0, job.height >= 0, job.offsetX >= 0, job.offsetY >= 0,
               try Checked.add(job.offsetX, job.width) <= job.rowStride,
               try Checked.mul(Checked.add(job.offsetY, job.height), job.rowStride)
-                <= geometry.components[job.component].coefficients.count else {
+                <= plane.count else {
             throw .invalidCodestream(.badCodeBlock)
         }
         return try Checked.add(Checked.mul(job.offsetY, job.rowStride), job.offsetX)
     }
 
     private static func store(_ job: CodeBlockJob, from decoder: borrowing CodeBlockDecoder,
-                              into geometry: inout TileGeometry) throws(JP2KError) {
+                              into plane: inout [Int32]) throws(JP2KError) {
         var source = 0
-        var row = try firstTarget(job, in: geometry)
+        var row = try firstTarget(job, in: plane)
         for _ in 0..<job.height {
             for x in 0..<job.width {
-                geometry.components[job.component].coefficients[row + x] = coefficient(job, decoder, source)
+                plane[row + x] = coefficient(job, decoder, source)
                 source += 1
             }
             row += job.rowStride
@@ -181,18 +182,20 @@ enum CodeBlockScheduler {
         var failure: (job: Int, error: JP2KError)?
     }
 
-    /// Allocator rounding is covered by 512 bytes plus 1/8 per allocation,
-    /// which bounds malloc rounding on every supported platform. It only
-    /// sizes the reservation; each worker's budget still checks every
-    /// allocation against its share.
-    private static func rounded(_ bytes: Int) throws(JP2KError) -> Int {
-        try Checked.add(Checked.add(bytes, bytes / 8), 512)
+    /// Allocator rounding allowance for one allocation. Small blocks come
+    /// from size classes at most 1/8 apart (plus 512 bytes); larger ones are
+    /// rounded to coarse quanta (32 KiB in macOS's medium zone, 64 KiB pages
+    /// on some Linux arm64 kernels), so they get 64 KiB more. It only sizes
+    /// reservations; the budgets still check every actual allocation, and an
+    /// estimate that falls short only sends the work back to the serial path.
+    static func rounded(_ bytes: Int) throws(JP2KError) -> Int {
+        try Checked.add(Checked.add(bytes, bytes / 8), bytes < 24_576 ? 512 : 65_536)
     }
 
     /// Scratch one worker may need at the largest nominal block size. Flags
     /// and samples may each be grown once while the old buffer is still live,
     /// and the MQ input doubles; three times the final size covers both.
-    private static func scratchBytes(width: Int, height: Int, maxData: Int) throws(JP2KError) -> Int {
+    static func scratchBytes(width: Int, height: Int, maxData: Int) throws(JP2KError) -> Int {
         let stride = try Checked.add(width, 2)
         let flagRows = try Checked.add(Checked.ceilDiv(height, 4), 2)
         let flags = try rounded(Checked.mul(Checked.mul(stride, flagRows), 4 * 3))
@@ -225,7 +228,7 @@ enum CodeBlockScheduler {
     /// Returns false when the worker budgets cannot be reserved or a worker
     /// ran out of its share; the caller then decodes serially, which charges
     /// exactly what it uses.
-    private static func runParallel(_ jobs: [CodeBlockJob], workers: Int, geometry: inout TileGeometry,
+    private static func runParallel(_ jobs: [CodeBlockJob], workers: Int, plane: inout [Int32],
                                     context: inout DecodeContext) async throws(JP2KError) -> Bool {
         let limits = scratchLimits(jobs)
         var maxData = 0
@@ -288,12 +291,11 @@ enum CodeBlockScheduler {
                 throw .invalidCodestream(.badCodeBlock)
             }
             let values = outputs[slot]
-            var row = try firstTarget(job, in: geometry)
+            var row = try firstTarget(job, in: plane)
             for source in stride(from: 0, to: values.count, by: max(job.width, 1)) {
                 let rowEnd = try Checked.add(row, job.width)
                 let sourceEnd = try Checked.add(source, job.width)
-                geometry.components[job.component].coefficients
-                    .replaceSubrange(row..<rowEnd, with: values[source..<sourceEnd])
+                plane.replaceSubrange(row..<rowEnd, with: values[source..<sourceEnd])
                 row = try Checked.add(row, job.rowStride)
             }
         }

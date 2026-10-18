@@ -50,6 +50,14 @@ enum InverseDWT {
     typealias WideLanes = SIMD16<Int64>
     typealias FloatLanes = SIMD16<Float>
 
+    /// Bytes `decode` requests for its work array (before allocator rounding).
+    static func workBytes(resolutions: [Resolution], reversible: Bool) throws(JP2KError) -> Int {
+        guard let last = resolutions.last, resolutions.count >= 2 else { return 0 }
+        let maxLength = max(try Checked.sub(last.x1, last.x0), try Checked.sub(last.y1, last.y0))
+        return try Checked.mul(maxLength, reversible ? MemoryLayout<IntegerLanes>.stride
+                                                     : MemoryLayout<FloatLanes>.stride)
+    }
+
     static func decode(_ values: inout [Int32], resolutions: [Resolution], reversible: Bool,
                        budget: inout MemoryBudget) throws(JP2KError) {
         guard let last = resolutions.last else { throw .invalidCodestream(.badCOD) }

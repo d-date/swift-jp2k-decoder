@@ -41,47 +41,106 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 // Ported from OpenJPEG v2.5.4: tcd.c: opj_tcd_decode_tile, opj_tcd_t1_decode, opj_tcd_dwt_decode, opj_tcd_mct_decode, opj_tcd_dc_level_shift_decode; t1.c: opj_t1_clbl_decode_processor
-/// Decodes one tile with a reusable Tier 1 scratch decoder.
+/// Decodes one tile: Tier-2 into the tile geometry (`prepare`), then Tier-1,
+/// the inverse DWT, MCT and level shift into separate coefficient planes
+/// (`reconstruct`). The split lets tiles be reconstructed concurrently
+/// while reading geometry that no one mutates.
 enum TileDecoder {
     static func decode(_ tile: TileData, header: MainHeader,
                        context: inout DecodeContext) async throws(JP2KError) -> TileGeometry {
-        var geometry = try TileGeometryBuilder.build(tile: tile, header: header, context: &context)
-        let positions = try PacketIterator.positions(geometry: geometry, parameters: tile.parameters,
-                                                     header: header, tileIndex: tile.index, context: &context)
-        try PacketDecoder.decodeTile(tile, geometry: &geometry, positions: positions, context: &context)
-        for component in geometry.components.indices {
-            let coding = tile.parameters.coc[component] ?? tile.parameters.cod.component
-            try await decodeCodeBlocks(tile, component: component, geometry: &geometry, context: &context)
-            try InverseDWT.decode(&geometry.components[component].coefficients,
-                                  resolutions: geometry.components[component].resolutions,
-                                  reversible: coding.reversible, budget: &context.budget)
+        var geometry = try prepare(tile, header: header, context: &context)
+        // The planes are moved out, not copied, so reconstruction can write
+        // them while the geometry is read; they are moved back afterwards.
+        var planes = try context.budget.array(repeating: [Int32](), count: geometry.components.count)
+        let listBytes = planes.capacity * MemoryLayout<[Int32]>.stride
+        defer { context.budget.release(bytes: listBytes) }
+        for component in planes.indices {
+            swap(&planes[component], &geometry.components[component].coefficients)
         }
-        if tile.parameters.cod.mct {
-            try InverseMCT.decode(&geometry, reversible: tile.parameters.cod.component.reversible)
-        }
-        for component in geometry.components.indices {
-            let descriptor = header.geometry.components[component]
-            let coding = tile.parameters.coc[component] ?? tile.parameters.cod.component
-            try InverseMCT.levelShift(&geometry.components[component].coefficients,
-                                      precision: descriptor.precision, signed: descriptor.isSigned,
-                                      reversible: coding.reversible)
+        try await reconstruct(tile, header: header, geometry: geometry, planes: &planes, context: &context)
+        for component in planes.indices {
+            swap(&planes[component], &geometry.components[component].coefficients)
         }
         return geometry
     }
 
-    /// Runs Tier-1 for one component. The job list is built from a borrowed
-    /// view of the component, so nothing else holds its coefficient plane
-    /// when the scheduler writes into it (a live copy would force a full
-    /// copy-on-write of the plane), and it is charged to the budget while it
-    /// exists.
-    private static func decodeCodeBlocks(_ tile: TileData, component: Int, geometry: inout TileGeometry,
-                                         context: inout DecodeContext) async throws(JP2KError) {
+    static func prepare(_ tile: TileData, header: MainHeader,
+                        context: inout DecodeContext) throws(JP2KError) -> TileGeometry {
+        var geometry = try TileGeometryBuilder.build(tile: tile, header: header, context: &context)
+        let positions = try PacketIterator.positions(geometry: geometry, parameters: tile.parameters,
+                                                     header: header, tileIndex: tile.index, context: &context)
+        try PacketDecoder.decodeTile(tile, geometry: &geometry, positions: positions, context: &context)
+        return geometry
+    }
+
+    /// `planes[c]` is component c's coefficient plane, the size the geometry
+    /// gave it; on return it holds the tile's reconstructed samples.
+    static func reconstruct(_ tile: TileData, header: MainHeader, geometry: TileGeometry,
+                            planes: inout [[Int32]], context: inout DecodeContext) async throws(JP2KError) {
+        guard planes.count == geometry.components.count else { throw .invalidCodestream(.badSIZ) }
+        for component in geometry.components.indices {
+            let coding = tile.parameters.coc[component] ?? tile.parameters.cod.component
+            try await decodeCodeBlocks(tile, component: component, geometry.components[component],
+                                       plane: &planes[component], context: &context)
+            try InverseDWT.decode(&planes[component], resolutions: geometry.components[component].resolutions,
+                                  reversible: coding.reversible, budget: &context.budget)
+        }
+        if tile.parameters.cod.mct {
+            try InverseMCT.decode(&planes, reversible: tile.parameters.cod.component.reversible)
+        }
+        for component in geometry.components.indices {
+            let descriptor = header.geometry.components[component]
+            let coding = tile.parameters.coc[component] ?? tile.parameters.cod.component
+            try InverseMCT.levelShift(&planes[component], precision: descriptor.precision,
+                                      signed: descriptor.isSigned, reversible: coding.reversible)
+        }
+    }
+
+    /// An upper bound on what `reconstruct` charges with code-blocks decoded
+    /// on one thread, plus fresh planes and the list holding them: the
+    /// budget one concurrently reconstructed tile needs.
+    static func reconstructionBytes(_ tile: TileData, geometry: TileGeometry) throws(JP2KError) -> Int {
+        var planes = try CodeBlockScheduler.rounded(
+            Checked.mul(geometry.components.count, MemoryLayout<[Int32]>.stride))
+        var transient = 0
+        for component in geometry.components.indices {
+            let coding = tile.parameters.coc[component] ?? tile.parameters.cod.component
+            let componentGeometry = geometry.components[component]
+            planes = try Checked.add(planes, CodeBlockScheduler.rounded(
+                Checked.mul(componentGeometry.coefficients.count, MemoryLayout<Int32>.stride)))
+            var blocks = 0
+            var maxData = 0
+            for resolution in componentGeometry.resolutions {
+                for band in resolution.bands {
+                    for precinct in band.precincts {
+                        for block in precinct.codeBlocks where block.totalPasses > 0 {
+                            blocks = try Checked.add(blocks, 1)
+                            maxData = max(maxData, block.data.count)
+                        }
+                    }
+                }
+            }
+            let list = try CodeBlockScheduler.rounded(Checked.mul(blocks, MemoryLayout<CodeBlockJob>.stride))
+            let scratch = try CodeBlockScheduler.scratchBytes(
+                width: Checked.shiftLeft(1, coding.codeBlockWidthExp),
+                height: Checked.shiftLeft(1, coding.codeBlockHeightExp), maxData: maxData)
+            let dwt = try CodeBlockScheduler.rounded(
+                InverseDWT.workBytes(resolutions: componentGeometry.resolutions, reversible: coding.reversible))
+            transient = max(transient, try Checked.add(list, Checked.add(scratch, dwt)))
+        }
+        return try Checked.add(planes, transient)
+    }
+
+    /// Runs Tier-1 for one component. The job list is charged to the budget
+    /// while it exists.
+    private static func decodeCodeBlocks(_ tile: TileData, component: Int, _ componentGeometry: TileComponent,
+                                         plane: inout [Int32], context: inout DecodeContext) async throws(JP2KError) {
         var listBytes = 0
         defer { context.budget.release(bytes: listBytes) }
-        let jobs = try codeBlockJobs(tile, component: component, geometry.components[component],
+        let jobs = try codeBlockJobs(tile, component: component, componentGeometry, planeCount: plane.count,
                                      listBytes: &listBytes, budget: &context.budget)
         if jobs.isEmpty { return }
-        try await CodeBlockScheduler.run(jobs, geometry: &geometry, context: &context)
+        try await CodeBlockScheduler.run(jobs, plane: &plane, context: &context)
     }
 
     /// Lists the component's code-blocks with coded passes in OpenJPEG's
@@ -90,7 +149,8 @@ enum TileDecoder {
     /// the same order whichever path decodes it. `listBytes` records what was
     /// charged for the list, including any capacity rounding.
     private static func codeBlockJobs(_ tile: TileData, component: Int, _ componentGeometry: borrowing TileComponent,
-                                      listBytes: inout Int, budget: inout MemoryBudget) throws(JP2KError) -> [CodeBlockJob] {
+                                      planeCount: Int, listBytes: inout Int,
+                                      budget: inout MemoryBudget) throws(JP2KError) -> [CodeBlockJob] {
         let coding = tile.parameters.coc[component] ?? tile.parameters.cod.component
         let roi = tile.parameters.rgn[component] ?? 0
         let width = try Checked.sub(componentGeometry.x1, componentGeometry.x0)
@@ -132,7 +192,8 @@ enum TileDecoder {
                         }
                         do {
                             try place(&job, block: block, band: band, resolution: resolution,
-                                      component: componentGeometry, width: width, height: height)
+                                      component: componentGeometry, planeCount: planeCount,
+                                      width: width, height: height)
                         } catch {
                             job.errorAfterDecode = error
                         }
@@ -147,7 +208,8 @@ enum TileDecoder {
     /// Validates that the block lands inside the component's coefficient grid,
     /// so the copy loops need no per-sample checks.
     private static func place(_ job: inout CodeBlockJob, block: CodeBlock, band: Band, resolution: Int,
-                              component: borrowing TileComponent, width: Int, height: Int) throws(JP2KError) {
+                              component: borrowing TileComponent, planeCount: Int,
+                              width: Int, height: Int) throws(JP2KError) {
         let blockWidth = try Checked.sub(block.x1, block.x0)
         let blockHeight = try Checked.sub(block.y1, block.y0)
         var offsetX = try Checked.sub(block.x0, band.x0)
@@ -160,7 +222,7 @@ enum TileDecoder {
         guard blockWidth > 0, blockHeight > 0, offsetX >= 0, offsetY >= 0,
               try Checked.add(offsetX, blockWidth) <= width,
               try Checked.add(offsetY, blockHeight) <= height,
-              try Checked.mul(Checked.add(offsetY, blockHeight), width) <= component.coefficients.count else {
+              try Checked.mul(Checked.add(offsetY, blockHeight), width) <= planeCount else {
             throw .invalidCodestream(.badCodeBlock)
         }
         job.offsetX = offsetX

@@ -167,6 +167,16 @@ public struct JP2KDecoder: Sendable {
         let (info, header, file) = try parseInfoArray(input, context: &context)
         let tileParts = try TilePartParser.parse(input, header: header, context: &context)
         try context.budget.reserve(bytes: try Checked.mul(tileParts.count, MemoryLayout<TileGeometry>.stride))
+        if try usesTileScheduler(tileParts, header: header, limits: context.limits) {
+            // The scheduler hands back nil when its outcome could depend on
+            // memory; the serial loop then starts again from this state.
+            let saved = context
+            if let tiles = try await TileScheduler.decode(tileParts, header: header, context: &context) {
+                let components = try ComponentAssembler.assemble(tiles, info: info, context: &context)
+                return (info, header, file, components)
+            }
+            context = saved
+        }
         var tiles: [TileGeometry] = []
         tiles.reserveCapacity(tileParts.count)
         for tile in tileParts { tiles.append(try await TileDecoder.decode(tile, header: header, context: &context)) }
@@ -174,6 +184,16 @@ public struct JP2KDecoder: Sendable {
         return (info, header, file, components)
     }
 
+    /// Tiles are reconstructed concurrently when there are several and the
+    /// image is large enough for the fan-out to pay off.
+    private func usesTileScheduler(_ tileParts: [TileData], header: MainHeader,
+                                   limits: Limits) throws(JP2KError) -> Bool {
+        guard tileParts.count > 1, limits.maxThreads > 1 else { return false }
+        let image = header.geometry
+        let samples = try Checked.mul(Checked.mul(Checked.sub(image.x1, image.x0), Checked.sub(image.y1, image.y0)),
+                                      image.components.count)
+        return samples >= limits.parallelSampleThreshold
+    }
 }
 
 struct DecodeMetrics {
