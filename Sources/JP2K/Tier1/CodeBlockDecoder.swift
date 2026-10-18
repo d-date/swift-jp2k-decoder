@@ -46,6 +46,7 @@ struct CodeBlockDecoder: ~Copyable {
     private static let pi = UInt32(1 << 21)
     private static let mu = UInt32(1 << 20)
     private static let piAll = UInt32((1 << 21) | (1 << 24) | (1 << 27) | (1 << 30))
+    private static let sigmaAll = UInt32((1 << 4) | (1 << 7) | (1 << 10) | (1 << 13))
     private let maxWidth: Int
     private let maxHeight: Int
     private var flags: [UInt32]
@@ -54,8 +55,11 @@ struct CodeBlockDecoder: ~Copyable {
     private var mqInput: [UInt8] = []
 
     init(maxWidth: Int, maxHeight: Int, budget: inout MemoryBudget) throws(JP2KError) {
-        guard (1...1024).contains(maxWidth), (1...1024).contains(maxHeight),
-              try Checked.mul(maxWidth, maxHeight) <= 4096 else { throw .invalidCodestream(.badCodeBlock) }
+        // Components may use different code-block shapes (e.g. 1024x4 and
+        // 4x1024), so only each side is bounded here; decode() bounds the area.
+        guard (1...1024).contains(maxWidth), (1...1024).contains(maxHeight) else {
+            throw .invalidCodestream(.badCodeBlock)
+        }
         self.maxWidth = maxWidth
         self.maxHeight = maxHeight
         flags = []
@@ -80,6 +84,7 @@ struct CodeBlockDecoder: ~Copyable {
             throw .invalidCodestream(.badCodeBlock)
         }
         let count = try Checked.mul(width, height)
+        guard count <= 4096 else { throw .invalidCodestream(.badCodeBlock) }
         let stride = try Checked.add(width, 2)
         let flagRows = try Checked.add(try Checked.ceilDiv(height, 4), 2)
         let activeFlags = try Checked.mul(stride, flagRows)
@@ -166,6 +171,13 @@ struct CodeBlockDecoder: ~Copyable {
         decodedCount = count
     }
 
+    /// Returns the scratch charged by earlier decodes; the decoder is done.
+    consuming func release(from budget: inout MemoryBudget) {
+        budget.release(bytes: flags.capacity * MemoryLayout<UInt32>.stride)
+        budget.release(bytes: data.capacity * MemoryLayout<Int32>.stride)
+        budget.release(bytes: mqInput.capacity)
+    }
+
     /// The last decoded block is read element by element from the budgeted
     /// scratch buffer (row-major, width × height), so the decoder never writes
     /// into a caller-owned array that might share copy-on-write storage.
@@ -215,6 +227,8 @@ struct CodeBlockDecoder: ~Copyable {
             let rows = min(4, height - stripe * 4)
             for x in 0..<width {
                 let flagIndex = (stripe + 1) * stride + x + 1
+                // A column with no significant neighbours has nothing to code.
+                if flags[flagIndex] == 0 { continue }
                 for row in 0..<rows {
                     let shift = row * 3
                     let word = flags[flagIndex]
@@ -243,16 +257,23 @@ struct CodeBlockDecoder: ~Copyable {
             let rows = min(4, height - stripe * 4)
             for x in 0..<width {
                 let flagIndex = (stripe + 1) * stride + x + 1
+                // Only already significant samples are refined. The pass changes
+                // no neighbour flags, so the column word is written back once.
+                var word = flags[flagIndex]
+                if word & Self.sigmaAll == 0 { continue }
+                var offset = stripe * 4 * width + x
                 for row in 0..<rows {
                     let shift = row * 3
-                    let word = flags[flagIndex]
-                    if (word & ((Self.sigma | Self.pi) << shift)) != (Self.sigma << shift) { continue }
-                    let offset = (stripe * 4 + row) * width + x
-                    let bit = raw ? mq.rawDecode() :
-                        mq.decode(context: T1Tables.magnitudeContext(flags: Int(word >> shift)))
-                    samples[offset] += (bit ^ (samples[offset] < 0 ? 1 : 0)) != 0 ? half : -half
-                    flags[flagIndex] |= Self.mu << shift
+                    if (word & ((Self.sigma | Self.pi) << shift)) == (Self.sigma << shift) {
+                        let bit = raw ? mq.rawDecode() :
+                            mq.decode(context: T1Tables.magnitudeContext(flags: Int(word >> shift)))
+                        let value = samples[offset]
+                        samples[offset] = (bit ^ (value < 0 ? 1 : 0)) != 0 ? value + half : value - half
+                        word |= Self.mu << shift
+                    }
+                    offset += width
                 }
+                flags[flagIndex] = word
             }
         }
     }

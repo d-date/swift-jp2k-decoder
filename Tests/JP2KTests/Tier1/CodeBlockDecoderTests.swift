@@ -128,7 +128,14 @@ func codeBlocksMatchOpenJPEG(_ name: String) throws {
 @Test func codeBlockRejectsInvalidGeometryAndStyle() throws {
     var budget = MemoryBudget(limit: 1 << 20)
     #expect(throws: JP2KError.invalidCodestream(.badCodeBlock)) {
-        _ = try CodeBlockDecoder(maxWidth: 65, maxHeight: 64, budget: &budget)
+        _ = try CodeBlockDecoder(maxWidth: 1025, maxHeight: 4, budget: &budget)
+    }
+    // Scratch limits are per side (components may differ in shape), but a
+    // single block may never exceed 4096 samples.
+    var wide = try CodeBlockDecoder(maxWidth: 1024, maxHeight: 1024, budget: &budget)
+    #expect(throws: JP2KError.invalidCodestream(.badCodeBlock)) {
+        try wide.decode(CodeBlock(x0: 0, y0: 0, x1: 65, y1: 64), orientation: 0, roiShift: 0,
+                        codeBlockStyle: 0, numBitPlanes: 4, budget: &budget)
     }
     var decoder = try CodeBlockDecoder(maxWidth: 8, maxHeight: 8, budget: &budget)
     let block = CodeBlock(x0: 0, y0: 0, x1: 8, y1: 8)
@@ -191,4 +198,18 @@ extension CodeBlockDecoder {
     func outputArray() -> [Int32] {
         (0..<outputCount).map { output(at: $0) }
     }
+}
+
+@Test func releasingTheDecoderReturnsItsScratchToTheBudget() throws {
+    // A decoder is created per tile; its scratch must not stay charged after
+    // the tile, or many-tile images would run out of budget for nothing.
+    var budget = MemoryBudget(limit: 1 << 20)
+    try budget.reserve(bytes: 100)
+    var decoder = try CodeBlockDecoder(maxWidth: 64, maxHeight: 64, budget: &budget)
+    let block = CodeBlock(x0: 0, y0: 0, x1: 64, y1: 64, segments: [CodeBlockSegment(passes: 1, length: 4)],
+                          data: [0x12, 0x34, 0x56, 0x78], totalPasses: 1)
+    try decoder.decode(block, orientation: 0, roiShift: 0, codeBlockStyle: 0, numBitPlanes: 4, budget: &budget)
+    #expect(budget.used > 100)
+    decoder.release(from: &budget)
+    #expect(budget.used == 100)
 }

@@ -124,7 +124,7 @@ public struct JP2KDecoder: Sendable {
         let image = try decodeComponentsArray(bytes, context: &context)
         return (image, DecodeMetrics(packets: context.packets, packetWork: context.packetWork,
                                      codingPasses: context.codingPasses, markerDataBytes: context.markerDataBytes,
-                                     peakMemoryBytes: context.budget.peak))
+                                     peakMemoryBytes: context.budget.peak, parallelRuns: context.parallelRuns))
     }
 
     /// Decodes to eight-bit interleaved pixels.
@@ -178,4 +178,5 @@ struct DecodeMetrics {
     let codingPasses: Int
     let markerDataBytes: Int
     let peakMemoryBytes: Int
+    let parallelRuns: Int
 }

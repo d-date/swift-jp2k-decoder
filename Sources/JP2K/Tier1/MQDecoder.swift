@@ -47,7 +47,10 @@ struct MQDecoder {
     private var a: UInt32 = 0x8000
     private var c: UInt32 = 0
     private var ct = 0
-    private var states = [Int](repeating: 0, count: 19)
+    /// Context states live in a fixed-size value (19 of 32 lanes used) rather
+    /// than an array, so updating one never pays a copy-on-write check.
+    private var states = SIMD32<UInt8>()
+    private static let contextCount = 19
     private(set) var endOfByteStreamCounter = 0
 
     /// The decoder keeps a padded copy of the code-block data (two 0xFF bytes
@@ -75,12 +78,12 @@ struct MQDecoder {
     }
 
     mutating func resetStates() {
-        for index in states.indices { states[index] = 0 }
+        states = SIMD32<UInt8>()
     }
 
     mutating func setState(context: Int, msb: Int, prob: Int) {
         guard (0..<19).contains(context), (0...1).contains(msb), (0..<47).contains(prob) else { return }
-        states[context] = msb + 2 * prob
+        states[context] = UInt8(msb + 2 * prob)
     }
 
     mutating func startSegment(_ index: Int, raw: Bool = false) {
@@ -136,39 +139,25 @@ struct MQDecoder {
     /// `context` comes from the T1 context tables, whose values are all in
     /// 0..<19 (pinned by a test); the guard only keeps a caller bug from trapping.
     @inline(__always) mutating func decode(context: Int) -> Int {
-        guard states.indices.contains(context) else { return 0 }
-        let state = T1Tables.states[states[context]]
-        a -= state.qeval
-        let decision: Int
-        var nextState: Int?
-        if c >> 16 < state.qeval {
-            if a < state.qeval {
-                a = state.qeval
-                decision = state.mps
-                nextState = state.nmps
-            } else {
-                a = state.qeval
-                decision = 1 - state.mps
-                nextState = state.nlps
-            }
+        guard context >= 0, context < Self.contextCount else { return 0 }
+        let state = T1Tables.states[Int(states[context])]
+        let qeval = UInt32(state.qeval)
+        a -= qeval
+        if c >> 16 < qeval {
+            // LPS exchange: the smaller interval decides which symbol was coded.
+            let mps = a < qeval
+            a = qeval
+            states[context] = mps ? state.nmps : state.nlps
             renormalize()
-        } else {
-            c -= state.qeval << 16
-            if a & 0x8000 == 0 {
-                if a < state.qeval {
-                    decision = 1 - state.mps
-                    nextState = state.nlps
-                } else {
-                    decision = state.mps
-                    nextState = state.nmps
-                }
-                renormalize()
-            } else {
-                decision = state.mps
-            }
+            return mps ? Int(state.mps) : 1 - Int(state.mps)
         }
-        if let nextState { states[context] = nextState }
-        return decision
+        c -= qeval << 16
+        if a & 0x8000 != 0 { return Int(state.mps) }
+        // MPS exchange.
+        let lps = a < qeval
+        states[context] = lps ? state.nlps : state.nmps
+        renormalize()
+        return lps ? 1 - Int(state.mps) : Int(state.mps)
     }
 
     @inline(__always) private func byte(at index: Int) -> UInt8 {

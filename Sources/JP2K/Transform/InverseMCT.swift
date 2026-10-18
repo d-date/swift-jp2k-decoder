@@ -76,14 +76,19 @@ enum InverseMCT {
         let offset = signed ? 0 : 1 << (precision - 1)
         let minimum = signed ? -(1 << (precision - 1)) : 0
         let maximum = signed ? (1 << (precision - 1)) - 1 : (1 << precision) - 1
-        for index in values.indices {
-            let value: Int64
-            if reversible { value = Int64(values[index]) } else {
-                let real = Float(bitPattern: UInt32(bitPattern: values[index]))
-                if real.isNaN { throw .invalidCodestream(.badCodeBlock) }
-                if real >= Float(Int32.max) { value = Int64(Int32.max) } else if real <= Float(Int32.min) { value = Int64(Int32.min) } else { value = Int64(real.rounded(.toNearestOrEven)) }
+        let low = Int64(minimum), high = Int64(maximum), shift = Int64(offset)
+        if reversible {
+            for index in values.indices {
+                values[index] = Int32(clamping: min(high, max(low, Int64(values[index]) + shift)))
             }
-            values[index] = Int32(clamping: min(Int64(maximum), max(Int64(minimum), value + Int64(offset))))
+            return
+        }
+        for index in values.indices {
+            let real = Float(bitPattern: UInt32(bitPattern: values[index]))
+            if real.isNaN { throw .invalidCodestream(.badCodeBlock) }
+            let value: Int64
+            if real >= Float(Int32.max) { value = Int64(Int32.max) } else if real <= Float(Int32.min) { value = Int64(Int32.min) } else { value = Int64(real.rounded(.toNearestOrEven)) }
+            values[index] = Int32(clamping: min(high, max(low, value + shift)))
         }
     }
 }

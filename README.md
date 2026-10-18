@@ -52,6 +52,7 @@ let crop = try decoder.decodePixels(rawBytes, color: .assume(.gray8),
 | `maxPacketIterations` | 4,194,304 | Packet scan steps, including skipped positions |
 | `maxCodingPasses` | 8,388,608 | Code-block coding passes |
 | `maxMarkerDataBytes` | 8 MiB | Retained marker data |
+| `maxThreads` | 8 | Threads for code-block decoding within a tile; 1 is serial |
 
 ## Safety and platforms
 
@@ -67,13 +68,15 @@ Apple Silicon release build, `swift run -c release jp2k-bench`: five warm-ups an
 
 | Input | JP2K | ImageIO |
 | --- | ---: | ---: |
-| Gray 378×472, lossless 5/3 | 49.1 | 29.8 |
-| Gray 378×472, lossy 9/7 | 11.3 | 2.8 |
-| RGB 64×64, lossless | 3.6 | 2.0 |
-| RGB 64×64, lossy | 0.67 | 0.37 |
-| `p0_07.j2k`, 2048×2048 | ~2,860–3,590 | ~1,500–1,780 |
+| Gray 378×472, lossless 5/3 | 6.4 | 20.5 |
+| Gray 378×472, lossy 9/7 | 2.6 | 2.0 |
+| RGB 64×64, lossless | 2.2 | 1.5 |
+| RGB 64×64, lossy | 0.25 | 0.26 |
+| `p0_07.j2k`, 2048×2048 | 475 | 1,161 |
 
-ImageIO is faster today: about 2× on most of these cases and about 4× on the small lossy gray case. JP2K trades speed for strict validation and no native or unsafe library code. A quick Linux aarch64 Docker run measured 48.8 ms for the gray lossless case; Windows timings are printed by CI.
+Code-blocks within a tile are decoded on up to `maxThreads` threads; tiles with fewer than 32,768 coded samples stay on one thread. The output is identical for every thread count, and the same input fails with the same error. Worker scratch is reserved from `maxMemoryBytes` first; if it does not fit, the tile is decoded on one thread instead. On Apple platforms the parallel path needs macOS 15 or iOS 18 (for `Synchronization`); earlier versions decode serially.
+
+JP2K is about 3× faster than ImageIO on the gray lossless image and about 2.4× faster on the 2048×2048 image. ImageIO stays ahead on the small lossy and RGB cases, where fixed per-image costs dominate. A Linux aarch64 Docker run on the same machine measured 10.4 ms (lossless) and 3.0 ms (lossy) for the gray image; Windows timings are printed by CI.
 
 ## Testing
 

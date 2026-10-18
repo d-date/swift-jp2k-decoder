@@ -59,7 +59,9 @@ import Testing
     #expect(candidate.count == 8)
     #expect(candidate.capacity == oldCapacity)
 
-    var enough = MemoryBudget(limit: before + target)
+    // The allocator may round the new buffer up (glibc does), and that
+    // rounding is charged too, so allow a little headroom over the target.
+    var enough = MemoryBudget(limit: before + target + 64)
     try enough.reserve(bytes: before)
     try enough.append(contentsOf: [UInt8](repeating: 2, count: oldCapacity + 1), to: &candidate)
     #expect(enough.used == candidate.capacity)

@@ -49,54 +49,9 @@ enum TileDecoder {
         let positions = try PacketIterator.positions(geometry: geometry, parameters: tile.parameters,
                                                      header: header, tileIndex: tile.index, context: &context)
         try PacketDecoder.decodeTile(tile, geometry: &geometry, positions: positions, context: &context)
-        var maxWidth = 1, maxHeight = 1
         for component in geometry.components.indices {
             let coding = tile.parameters.coc[component] ?? tile.parameters.cod.component
-            maxWidth = max(maxWidth, try Checked.shiftLeft(1, coding.codeBlockWidthExp))
-            maxHeight = max(maxHeight, try Checked.shiftLeft(1, coding.codeBlockHeightExp))
-        }
-        var decoder = try CodeBlockDecoder(maxWidth: maxWidth, maxHeight: maxHeight, budget: &context.budget)
-        for component in geometry.components.indices {
-            let coding = tile.parameters.coc[component] ?? tile.parameters.cod.component
-            let roi = tile.parameters.rgn[component] ?? 0
-            let width = try Checked.sub(geometry.components[component].x1, geometry.components[component].x0)
-            for resolution in geometry.components[component].resolutions.indices {
-                let bands = geometry.components[component].resolutions[resolution].bands
-                for bandIndex in bands.indices {
-                    let band = bands[bandIndex]
-                    for precinct in band.precincts {
-                        for block in precinct.codeBlocks where block.totalPasses > 0 {
-                            let bitPlanes = try Checked.sub(try Checked.add(band.numBitPlanes, 1), block.zeroBitPlanes)
-                            try decoder.decode(block, orientation: band.orientation, roiShift: roi,
-                                               codeBlockStyle: coding.codeBlockStyle, numBitPlanes: bitPlanes,
-                                               budget: &context.budget)
-                            let blockWidth = try Checked.sub(block.x1, block.x0)
-                            let blockHeight = try Checked.sub(block.y1, block.y0)
-                            var offsetX = try Checked.sub(block.x0, band.x0)
-                            var offsetY = try Checked.sub(block.y0, band.y0)
-                            if resolution > 0 {
-                                let previous = geometry.components[component].resolutions[resolution - 1]
-                                if band.orientation & 1 != 0 { offsetX = try Checked.add(offsetX, Checked.sub(previous.x1, previous.x0)) }
-                                if band.orientation & 2 != 0 { offsetY = try Checked.add(offsetY, Checked.sub(previous.y1, previous.y0)) }
-                            }
-                            for y in 0..<blockHeight {
-                                for x in 0..<blockWidth {
-                                    let source = try Checked.add(Checked.mul(y, blockWidth), x)
-                                    let dest = try Checked.add(Checked.mul(try Checked.add(offsetY, y), width),
-                                                               Checked.add(offsetX, x))
-                                    guard source < decoder.outputCount, dest >= 0,
-                                          dest < geometry.components[component].coefficients.count else {
-                                        throw .invalidCodestream(.badCodeBlock)
-                                    }
-                                    geometry.components[component].coefficients[dest] = Dequantize.sample(
-                                        decoder.output(at: source), roiShift: roi, reversible: coding.reversible,
-                                        stepSize: band.stepSize)
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            try decodeCodeBlocks(tile, component: component, geometry: &geometry, context: &context)
             try InverseDWT.decode(&geometry.components[component].coefficients,
                                   resolutions: geometry.components[component].resolutions,
                                   reversible: coding.reversible, budget: &context.budget)
@@ -112,5 +67,105 @@ enum TileDecoder {
                                       reversible: coding.reversible)
         }
         return geometry
+    }
+
+    /// Runs Tier-1 for one component. The job list is built from a borrowed
+    /// view of the component, so nothing else holds its coefficient plane
+    /// when the scheduler writes into it (a live copy would force a full
+    /// copy-on-write of the plane), and it is charged to the budget while it
+    /// exists.
+    private static func decodeCodeBlocks(_ tile: TileData, component: Int, geometry: inout TileGeometry,
+                                         context: inout DecodeContext) throws(JP2KError) {
+        var listBytes = 0
+        defer { context.budget.release(bytes: listBytes) }
+        let jobs = try codeBlockJobs(tile, component: component, geometry.components[component],
+                                     listBytes: &listBytes, budget: &context.budget)
+        if jobs.isEmpty { return }
+        try CodeBlockScheduler.run(jobs, geometry: &geometry, context: &context)
+    }
+
+    /// Lists the component's code-blocks with coded passes in OpenJPEG's
+    /// decode order. Errors the serial loop used to raise before or after
+    /// decoding a block are attached to that block's job, so they surface in
+    /// the same order whichever path decodes it. `listBytes` records what was
+    /// charged for the list, including any capacity rounding.
+    private static func codeBlockJobs(_ tile: TileData, component: Int, _ componentGeometry: borrowing TileComponent,
+                                      listBytes: inout Int, budget: inout MemoryBudget) throws(JP2KError) -> [CodeBlockJob] {
+        let coding = tile.parameters.coc[component] ?? tile.parameters.cod.component
+        let roi = tile.parameters.rgn[component] ?? 0
+        let width = try Checked.sub(componentGeometry.x1, componentGeometry.x0)
+        let height = try Checked.sub(componentGeometry.y1, componentGeometry.y0)
+        let maxWidth = try Checked.shiftLeft(1, coding.codeBlockWidthExp)
+        let maxHeight = try Checked.shiftLeft(1, coding.codeBlockHeightExp)
+        var count = 0
+        for resolution in componentGeometry.resolutions {
+            for band in resolution.bands {
+                for precinct in band.precincts {
+                    for block in precinct.codeBlocks where block.totalPasses > 0 { count = try Checked.add(count, 1) }
+                }
+            }
+        }
+        if count == 0 { return [] }
+        let requested = try Checked.mul(count, MemoryLayout<CodeBlockJob>.stride)
+        try budget.reserve(bytes: requested)
+        listBytes = requested
+        var jobs: [CodeBlockJob] = []
+        jobs.reserveCapacity(count)
+        let actual = try Checked.mul(jobs.capacity, MemoryLayout<CodeBlockJob>.stride)
+        if actual > requested {
+            try budget.reserve(bytes: actual - requested)
+            listBytes = actual
+        }
+        for resolution in componentGeometry.resolutions.indices {
+            let bands = componentGeometry.resolutions[resolution].bands
+            for band in bands {
+                for precinct in band.precincts {
+                    for block in precinct.codeBlocks where block.totalPasses > 0 {
+                        var job = CodeBlockJob(component: component, block: block, orientation: band.orientation,
+                                               roiShift: roi, codeBlockStyle: coding.codeBlockStyle,
+                                               reversible: coding.reversible, stepSize: band.stepSize,
+                                               maxWidth: maxWidth, maxHeight: maxHeight, rowStride: width)
+                        do {
+                            job.numBitPlanes = try Checked.sub(try Checked.add(band.numBitPlanes, 1), block.zeroBitPlanes)
+                        } catch {
+                            job.errorBeforeDecode = error
+                        }
+                        do {
+                            try place(&job, block: block, band: band, resolution: resolution,
+                                      component: componentGeometry, width: width, height: height)
+                        } catch {
+                            job.errorAfterDecode = error
+                        }
+                        jobs.append(job)
+                    }
+                }
+            }
+        }
+        return jobs
+    }
+
+    /// Validates that the block lands inside the component's coefficient grid,
+    /// so the copy loops need no per-sample checks.
+    private static func place(_ job: inout CodeBlockJob, block: CodeBlock, band: Band, resolution: Int,
+                              component: borrowing TileComponent, width: Int, height: Int) throws(JP2KError) {
+        let blockWidth = try Checked.sub(block.x1, block.x0)
+        let blockHeight = try Checked.sub(block.y1, block.y0)
+        var offsetX = try Checked.sub(block.x0, band.x0)
+        var offsetY = try Checked.sub(block.y0, band.y0)
+        if resolution > 0 {
+            let previous = component.resolutions[resolution - 1]
+            if band.orientation & 1 != 0 { offsetX = try Checked.add(offsetX, Checked.sub(previous.x1, previous.x0)) }
+            if band.orientation & 2 != 0 { offsetY = try Checked.add(offsetY, Checked.sub(previous.y1, previous.y0)) }
+        }
+        guard blockWidth > 0, blockHeight > 0, offsetX >= 0, offsetY >= 0,
+              try Checked.add(offsetX, blockWidth) <= width,
+              try Checked.add(offsetY, blockHeight) <= height,
+              try Checked.mul(Checked.add(offsetY, blockHeight), width) <= component.coefficients.count else {
+            throw .invalidCodestream(.badCodeBlock)
+        }
+        job.offsetX = offsetX
+        job.offsetY = offsetY
+        job.width = blockWidth
+        job.height = blockHeight
     }
 }

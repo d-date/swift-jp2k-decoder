@@ -33,6 +33,16 @@ public struct Limits: Sendable, Equatable {
     public var maxPacketIterations: Int = 4_194_304
     public var maxCodingPasses: Int = 8_388_608
     public var maxMarkerDataBytes: Int = 8 << 20
+    /// Upper bound on workers used for Tier-1 decoding of one tile component;
+    /// 1 decodes serially. Output and errors are identical for every value.
+    /// Workers run through Dispatch, which runs no more of them at once than
+    /// there are available cores. Worker scratch comes out of
+    /// `maxMemoryBytes`; when it does not fit, decoding falls back to one
+    /// thread instead of failing.
+    public var maxThreads: Int = 8
+    /// Tiles with fewer coded samples stay on one thread, where start-up
+    /// would cost more than it saves. Internal so tests can force either path.
+    var parallelSampleThreshold = 32_768
 
     public init() {}
 }

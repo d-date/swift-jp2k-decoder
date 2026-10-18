@@ -15,8 +15,7 @@ import Testing
     }
     var packed = forward.indices.filter { $0 & 1 == 0 }.map { forward[$0] }
     packed += forward.indices.filter { $0 & 1 == 1 }.map { forward[$0] }
-    var work = [Int32](repeating: 0, count: original.count)
-    InverseDWT.inverse53(&packed, work: &work, lowCount: 5, count: original.count, parity: 0)
+    InverseDWT.inverse53(&packed, lowCount: 5, count: original.count, parity: 0)
     #expect(packed == original)
 }
 
@@ -37,8 +36,7 @@ import Testing
     for index in forward.indices { forward[index] /= index & 1 == 0 ? 1.230174105 : 1.625732422 }
     var packed = forward.indices.filter { $0 & 1 == 0 }.map { Int32(bitPattern: forward[$0].bitPattern) }
     packed += forward.indices.filter { $0 & 1 == 1 }.map { Int32(bitPattern: forward[$0].bitPattern) }
-    var work = [Float](repeating: 0, count: original.count)
-    InverseDWT.inverse97(&packed, work: &work, lowCount: 5, count: original.count, parity: 0)
+    InverseDWT.inverse97(&packed, lowCount: 5, count: original.count, parity: 0)
     for index in original.indices {
         let value = Float(bitPattern: UInt32(bitPattern: packed[index]))
         #expect(abs(value - original[index]) < 0.001)

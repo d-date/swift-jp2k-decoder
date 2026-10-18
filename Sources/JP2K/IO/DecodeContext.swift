@@ -6,11 +6,15 @@ struct DecodeContext {
     private(set) var packetWork: Int = 0
     private(set) var codingPasses: Int = 0
     private(set) var markerDataBytes: Int = 0
+    /// Tile components whose code-blocks were decoded on several threads.
+    private(set) var parallelRuns: Int = 0
 
     init(limits: Limits) {
         self.limits = limits
         budget = MemoryBudget(limit: limits.maxMemoryBytes)
     }
+
+    mutating func countParallelRun() { parallelRuns &+= 1 }
 
     mutating func countPacket() throws(JP2KError) {
         try count(1, current: &packets, maximum: limits.maxPackets, kind: .packets)

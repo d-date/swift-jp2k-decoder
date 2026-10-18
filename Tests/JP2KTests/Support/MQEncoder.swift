@@ -52,18 +52,20 @@ struct MQEncoder {
 
     mutating func encode(_ bit: Int, context: Int) {
         let state = T1Tables.states[states[context]]
-        a -= state.qeval
-        if bit == state.mps {
+        let qeval = UInt32(state.qeval)
+        let mps = Int(state.mps)
+        a -= qeval
+        if bit == mps {
             if a & 0x8000 == 0 {
-                if a < state.qeval { a = state.qeval } else { c &+= state.qeval }
-                states[context] = state.nmps
+                if a < qeval { a = qeval } else { c &+= qeval }
+                states[context] = Int(state.nmps)
                 renormalize()
             } else {
-                c &+= state.qeval
+                c &+= qeval
             }
         } else {
-            if a < state.qeval { c &+= state.qeval } else { a = state.qeval }
-            states[context] = state.nlps
+            if a < qeval { c &+= qeval } else { a = qeval }
+            states[context] = Int(state.nlps)
             renormalize()
         }
     }

@@ -67,13 +67,14 @@ enum ComponentAssembler {
                       try Checked.mul(width, height) == source.coefficients.count else {
                     throw .invalidCodestream(.badSIZ)
                 }
-                for row in 0..<height {
-                    for column in 0..<width {
-                        let src = try Checked.add(Checked.mul(row, width), column)
-                        let dst = try Checked.add(Checked.mul(try Checked.add(startY, row), destination.width),
-                                                  Checked.add(startX, column))
-                        output[component][dst] = source.coefficients[src]
-                    }
+                // The guard bounds every row below, so copy whole rows.
+                var src = 0
+                var dst = startY * destination.width + startX
+                for _ in 0..<height {
+                    output[component].replaceSubrange(dst..<(dst + width),
+                                                      with: source.coefficients[src..<(src + width)])
+                    src += width
+                    dst += destination.width
                 }
             }
         }

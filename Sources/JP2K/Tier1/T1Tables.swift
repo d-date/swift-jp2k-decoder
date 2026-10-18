@@ -40,10 +40,10 @@
  */
 // Ported from OpenJPEG v2.5.4: t1.c: opj_t1_getctxno_zc, opj_t1_getctxno_sc, opj_t1_getctxno_mag, opj_t1_getspb; t1_luts.h: lut_ctxno_zc, lut_ctxno_sc, lut_spb; mqc.c: mqc_states
 struct MQState {
-    let qeval: UInt32
-    let mps: Int
-    let nmps: Int
-    let nlps: Int
+    let qeval: UInt16
+    let mps: UInt8
+    let nmps: UInt8
+    let nlps: UInt8
 }
 
 enum T1Tables {

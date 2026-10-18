@@ -131,6 +131,7 @@ Limits.maxMemoryBytes | var maxMemoryBytes: Int
 Limits.maxPacketIterations | var maxPacketIterations: Int
 Limits.maxPackets | var maxPackets: Int
 Limits.maxPixels | var maxPixels: Int
+Limits.maxThreads | var maxThreads: Int
 Limits.maxTileParts | var maxTileParts: Int
 Limits.maxTiles | var maxTiles: Int
 PixelFormat | enum PixelFormat
