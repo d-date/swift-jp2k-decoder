@@ -77,10 +77,12 @@ private func run() throws {
     ]
     var cases = fixtureNames.map { Case(name: $0, url: fixtureDirectory.appendingPathComponent($0), color: .container) }
     if !quick, let conformance = ProcessInfo.processInfo.environment["JP2K_CONFORMANCE_DIR"] {
-        cases.append(Case(name: "p0_07.j2k (2048x2048)",
-                          url: URL(fileURLWithPath: conformance, isDirectory: true)
-                            .appendingPathComponent("input/conformance/p0_07.j2k"),
+        let directory = URL(fileURLWithPath: conformance, isDirectory: true)
+            .appendingPathComponent("input/conformance", isDirectory: true)
+        cases.append(Case(name: "p0_07.j2k (2048x2048)", url: directory.appendingPathComponent("p0_07.j2k"),
                           color: .inferFromComponentCount))
+        cases.append(Case(name: "file2.jp2 (sYCC 480x640)", url: directory.appendingPathComponent("file2.jp2"),
+                          color: .container))
     }
     let warmups = quick ? 1 : 5
     let iterations = quick ? 3 : 50

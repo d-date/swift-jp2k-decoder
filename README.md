@@ -68,15 +68,18 @@ Apple Silicon release build, `swift run -c release jp2k-bench`: five warm-ups an
 
 | Input | JP2K | ImageIO |
 | --- | ---: | ---: |
-| Gray 378×472, lossless 5/3 | 6.4 | 20.5 |
-| Gray 378×472, lossy 9/7 | 2.6 | 2.0 |
+| Gray 378×472, lossless 5/3 | 6.1 | 20.6 |
+| Gray 378×472, lossy 9/7 | 2.4 | 2.0 |
 | RGB 64×64, lossless | 2.2 | 1.5 |
-| RGB 64×64, lossy | 0.25 | 0.26 |
+| RGB 64×64, lossy | 0.24 | 0.27 |
+| `file2.jp2`, 480×640 sYCC | 23.9 | 65.3 |
 | `p0_07.j2k`, 2048×2048 | 475 | 1,161 |
+
+The two conformance rows need `JP2K_CONFORMANCE_DIR`. `p0_07.j2k` is decoded on several threads, so it was measured on an otherwise idle machine; with other processes holding a few cores it took about 1.65 s.
 
 Code-blocks within a tile are decoded on up to `maxThreads` threads; tiles with fewer than 32,768 coded samples stay on one thread. The output is identical for every thread count, and the same input fails with the same error. Worker scratch is reserved from `maxMemoryBytes` first; if it does not fit, the tile is decoded on one thread instead. On Apple platforms the parallel path needs macOS 15 or iOS 18 (for `Synchronization`); earlier versions decode serially.
 
-JP2K is about 3× faster than ImageIO on the gray lossless image and about 2.4× faster on the 2048×2048 image. ImageIO stays ahead on the small lossy and RGB cases, where fixed per-image costs dominate. A Linux aarch64 Docker run on the same machine measured 10.4 ms (lossless) and 3.0 ms (lossy) for the gray image; Windows timings are printed by CI.
+JP2K is about 3× faster than ImageIO on the gray lossless image, about 2.7× faster on the sYCC image and about 2.4× faster on the 2048×2048 image. ImageIO stays ahead on the small lossy and RGB cases, where fixed per-image costs dominate. A Linux aarch64 Docker run on the same machine measured 10.4 ms (lossless) and 3.0 ms (lossy) for the gray image; Windows timings are printed by CI.
 
 ## Testing
 
