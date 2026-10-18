@@ -77,7 +77,7 @@ ImageIO is faster today: about 2× on most of these cases and about 4× on the s
 
 ## Testing
 
-Run `swift test` for generated fixtures, malformed inputs, limit boundaries, and decoding tests. An exhaustive sweep of 16,410 truncations and 72,000 bit flips completed cleanly in macOS and Linux release builds. A libFuzzer harness (ASan) is in `Fuzz/`. About 1.6 hours of fuzzing (four jobs, seeded with the fixtures and conformance files) have found no crash, out-of-memory or hang in the decoder so far; longer runs use the manual `Extended checks` workflow.
+Run `swift test` for generated fixtures, malformed inputs, limit boundaries, and decoding tests. An exhaustive sweep of 16,410 truncations and 72,000 bit flips completed cleanly in macOS and Linux release builds. A libFuzzer harness (ASan) is in `Fuzz/`. About 7.8 hours of fuzzing (a 1.6-hour run with four jobs and a 6.2-hour run with three jobs, about 4 million inputs, seeded with the fixtures and conformance files) have found no crash, out-of-memory or hang in the decoder so far; longer runs use the manual `Extended checks` workflow.
 
 ISO/IEC 15444-4 class-1 cases at ResFactor 0 pass their official PEAK/MSE tolerances. The a–g codestream set matches its reference images exactly. Colour conformance files `file2.jp2`, `file3.jp2`, and `file9.jp2` match OpenJPEG output apart from one `file2.jp2` pixel where the OpenJPEG reference build used fused multiply-add; this decoder uses platform-independent arithmetic.
 
