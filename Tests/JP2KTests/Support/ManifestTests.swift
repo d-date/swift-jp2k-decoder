@@ -19,11 +19,17 @@ struct ManifestTests {
             #expect(actual == parts[0], "Checksum mismatch: \(name)")
         }
         let directory = manifestURL.deletingLastPathComponent()
+        // The enumerator may report symlink-resolved paths (e.g. /private/var
+        // on the iOS simulator), so compare resolved path components rather
+        // than trimming a character count.
+        let base = directory.resolvingSymlinksInPath().standardizedFileURL.pathComponents
         let entries = try #require(FileManager.default.enumerator(at: directory, includingPropertiesForKeys: [.isRegularFileKey]))
         var files: Set<String> = []
         for case let url as URL in entries {
             guard try url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true else { continue }
-            let name = String(url.path.dropFirst(directory.path.count + 1))
+            let components = url.resolvingSymlinksInPath().standardizedFileURL.pathComponents
+            try #require(Array(components.prefix(base.count)) == base, "\(url.path) is outside \(directory.path)")
+            let name = components.dropFirst(base.count).joined(separator: "/")
             if name != "MANIFEST.sha256" { files.insert(name) }
         }
         #expect(listed == files)
