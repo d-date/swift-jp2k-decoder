@@ -156,14 +156,13 @@ enum CodeBlockScheduler {
                           stepSize: job.stepSize)
     }
 
-    // MARK: - Parallel path
+    // MARK: - Concurrent path
 
-    /// What one worker hands back: the coefficients of its jobs in order,
-    /// or that one of them failed (or outgrew the worker's share).
+    /// What one worker hands back: the coefficients of its jobs in order, or
+    /// nil when one of them failed (or outgrew the worker's share).
     private struct WorkerResult: Sendable {
         let worker: Int
-        var outputs: [[Int32]] = []
-        var failed = false
+        var outputs: [[Int32]]?
     }
 
     /// Allocator rounding allowance for one allocation. Small blocks come
@@ -219,14 +218,14 @@ enum CodeBlockScheduler {
         let workers = min(context.limits.maxThreads, jobs.count)
         guard workers > 1 else { return false }
         do throws(JP2KError) {
-            if try await decodeConcurrently(jobs, workers: workers, into: &planes, context: &context) { return true }
-        } catch {}
-        context.countParallelFallback()
-        return false
+            return try await decodeOnWorkers(jobs, workers: workers, into: &planes, context: &context)
+        } catch {
+            return false
+        }
     }
 
-    private static func decodeConcurrently(_ jobs: [CodeBlockJob], workers: Int, into planes: inout [[Int32]],
-                                           context: inout DecodeContext) async throws(JP2KError) -> Bool {
+    private static func decodeOnWorkers(_ jobs: [CodeBlockJob], workers: Int, into planes: inout [[Int32]],
+                                        context: inout DecodeContext) async throws(JP2KError) -> Bool {
         let limits = scratchLimits(jobs)
         var maxData = 0
         for job in jobs { maxData = max(maxData, job.block.data.count) }
@@ -255,7 +254,6 @@ enum CodeBlockScheduler {
             for await result in group { results[result.worker] = result }
             return results
         }
-        for result in results where result == nil || result?.failed == true { return false }
         // Every output is checked before the first one is written, so a
         // false return leaves the planes as they were.
         for index in jobs.indices {
@@ -268,7 +266,7 @@ enum CodeBlockScheduler {
         }
         for index in jobs.indices {
             let job = jobs[index]
-            guard let values = results[index % workers]?.outputs[index / workers] else { return false }
+            guard let values = results[index % workers]?.outputs?[index / workers] else { return false }
             var row = try firstTarget(job, in: planes[job.component])
             for source in stride(from: 0, to: values.count, by: max(job.width, 1)) {
                 let rowEnd = try Checked.add(row, job.width)
@@ -289,7 +287,7 @@ enum CodeBlockScheduler {
         var result = WorkerResult(worker: worker)
         do throws(JP2KError) {
             let count = try strideCount(jobs.count, worker: worker, workers: workers)
-            result.outputs = try budget.array(repeating: [], count: count)
+            var outputs: [[Int32]] = try budget.array(repeating: [], count: count)
             var decoder = try CodeBlockDecoder(maxWidth: limits.width, maxHeight: limits.height, budget: &budget)
             var slot = 0
             var index = worker
@@ -298,14 +296,13 @@ enum CodeBlockScheduler {
                 try decode(job, with: &decoder, budget: &budget)
                 var values = try budget.array(repeating: Int32(0), count: Checked.mul(job.width, job.height))
                 for sample in values.indices { values[sample] = coefficient(job, decoder, sample) }
-                result.outputs[slot] = values
+                outputs[slot] = values
                 slot = try Checked.add(slot, 1)
                 index = try Checked.add(index, workers)
             }
+            result.outputs = outputs
         } catch {
             // The serial path will find the error again, in order.
-            result.failed = true
-            result.outputs = []
         }
         return result
     }

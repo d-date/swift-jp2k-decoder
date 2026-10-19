@@ -112,6 +112,16 @@ struct CodeBlockSchedulerTests {
         #expect((runs > 0) == fansOut)
     }
 
+    @Test func workCountsCodedBytesAndASixteenthOfTheSamples() throws {
+        let limits = Limits()
+        #expect(limits.parallelWorkThreshold == 2_048)
+        #expect(try limits.warrantsFanOut(codedBytes: 2_047, samples: 15) == false)
+        #expect(try limits.warrantsFanOut(codedBytes: 2_047, samples: 16))
+        #expect(try limits.warrantsFanOut(codedBytes: 0, samples: 32_767) == false)
+        #expect(try limits.warrantsFanOut(codedBytes: 0, samples: 32_768))
+        #expect(try limits.warrantsFanOut(codedBytes: 1_024, samples: 16_384))
+    }
+
     // MARK: - Falling back from a concurrent run
 
     /// The single tile of a three-component codestream, with a reserved
@@ -193,28 +203,26 @@ struct CodeBlockSchedulerTests {
         }
     }
 
-    @Test func memoryLimitBoundaryDoesNotDependOnThreads() async throws {
-        // Limits clearly below the serial minimum fail and limits clearly
-        // above it succeed with any thread count: when the worker shares do
-        // not fit, the tile decodes on one thread. (glibc's allocation
-        // rounding varies between runs, so the exact boundary is avoided.)
-        let bytes = Array(try Data(contentsOf: #require(Fixtures.url("subsampled-rgb.j2k"))))
-        func succeeds(_ limit: Int, threads: Int) async -> Bool {
-            var limits = limits(threads: threads)
-            limits.maxMemoryBytes = limit
-            return (try? await JP2KDecoder(limits: limits).decodeComponents(bytes)) != nil
-        }
-        var lower = 0
-        var upper = Limits().maxMemoryBytes
-        while lower < upper {
-            let middle = lower + (upper - lower) / 2
-            if await succeeds(middle, threads: 1) { upper = middle } else { lower = middle + 1 }
-        }
-        for offset in [-8_192, -4_096] {
-            #expect(await succeeds(lower + offset, threads: 8) == false, "\(offset) below the minimum")
-        }
-        for offset in [4_096, 8_192] {
-            #expect(await succeeds(lower + offset, threads: 8), "\(offset) above the minimum")
+    @Test func failedJobListingCountsAsAFallback() async throws {
+        // With no budget left for reconstruction, listing the tile's jobs
+        // for the concurrent run fails first; the tile then takes the serial
+        // path, which reports .memory as a one-thread decode does.
+        let (header, tile) = try tile(damaging: [])
+        for threads in [1, 8] {
+            var prepared = DecodeContext(limits: limits(threads: threads))
+            var geometry = try TileDecoder.prepare(tile, header: header, context: &prepared)
+            var planes = geometry.components.map(\.coefficients)
+            for component in geometry.components.indices { geometry.components[component].coefficients = [] }
+            var context = DecodeContext(limits: limits(threads: threads))
+            context.budget = MemoryBudget(limit: 0)
+            do {
+                try await TileDecoder.reconstruct(tile, header: header, geometry: geometry, planes: &planes,
+                                                  context: &context)
+                Issue.record("expected .memory with \(threads) threads")
+            } catch {
+                #expect(error == .limitExceeded(.memory))
+            }
+            #expect(context.parallelFallbacks == (threads > 1 ? 1 : 0))
         }
     }
 

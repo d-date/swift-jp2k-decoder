@@ -153,22 +153,24 @@ enum TileDecoder {
     private static func decodeCodeBlocksConcurrently(_ tile: TileData, geometry: TileGeometry,
                                                      planes: inout [[Int32]],
                                                      context: inout DecodeContext) async -> Bool {
-        guard context.limits.maxThreads > 1 else { return false }
+        guard context.limits.maxThreads > 1,
+              (try? warrantsFanOut(tile, planes: planes, limits: context.limits)) == true else { return false }
         var listBytes = 0
         defer { context.budget.release(bytes: listBytes) }
-        let jobs: [CodeBlockJob]
-        do {
-            var samples = 0
-            for plane in planes { samples = try Checked.add(samples, plane.count) }
-            guard try context.limits.warrantsFanOut(codedBytes: tile.body.count, samples: samples) else {
-                return false
-            }
-            jobs = try codeBlockJobs(tile, components: geometry.components.indices, geometry: geometry,
-                                     planes: planes, listBytes: &listBytes, budget: &context.budget)
-        } catch {
-            return false
+        if let jobs = try? codeBlockJobs(tile, components: geometry.components.indices, geometry: geometry,
+                                         planes: planes, listBytes: &listBytes, budget: &context.budget),
+           await CodeBlockScheduler.decodeConcurrently(jobs, into: &planes, context: &context) {
+            return true
         }
-        return await CodeBlockScheduler.decodeConcurrently(jobs, into: &planes, context: &context)
+        context.countParallelFallback()
+        return false
+    }
+
+    private static func warrantsFanOut(_ tile: TileData, planes: [[Int32]],
+                                       limits: Limits) throws(JP2KError) -> Bool {
+        var samples = 0
+        for plane in planes { samples = try Checked.add(samples, plane.count) }
+        return try limits.warrantsFanOut(codedBytes: tile.body.count, samples: samples)
     }
 
     /// Lists the components' code-blocks with coded passes in OpenJPEG's
