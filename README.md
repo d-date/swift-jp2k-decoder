@@ -79,12 +79,12 @@ Apple Silicon release build, `swift run -c release jp2k-bench`: five warm-ups an
 
 | Input | JP2K | ImageIO |
 | --- | ---: | ---: |
-| Gray 378×472, lossless 5/3 | 5.3 | 20.1 |
-| Gray 378×472, lossy 9/7 | 2.4 | 1.9 |
-| RGB 64×64, lossless | 1.7 | 1.4 |
-| RGB 64×64, lossy | 0.23 | 0.26 |
-| `file2.jp2`, 480×640 sYCC | 25.0 | 65.3 |
-| `p0_07.j2k`, 2048×2048 | 240 | 1,146 |
+| Gray 378×472, lossless 5/3 | 5.2 | 20.0 |
+| Gray 378×472, lossy 9/7 | 2.3 | 1.9 |
+| RGB 64×64, lossless | 0.72 | 1.5 |
+| RGB 64×64, lossy | 0.23 | 0.27 |
+| `file2.jp2`, 480×640 sYCC | 23.9 | 65.0 |
+| `p0_07.j2k`, 2048×2048 | 245 | 1,136 |
 
 The two conformance rows need `JP2K_CONFORMANCE_DIR`.
 
@@ -92,7 +92,7 @@ Up to `maxThreads` child tasks share the work: an image with several tiles recon
 
 Concurrency shortens each decode but adds a little CPU time for starting tasks. When many images are decoded at once, for example on a server, set `maxThreads` to 1 and decode images in parallel instead, which gives the best total throughput.
 
-JP2K is about 3.8× faster than ImageIO on the gray lossless image, about 2.6× faster on the sYCC image and about 4.8× faster on the 2048×2048 image. ImageIO stays ahead on the small lossy and RGB cases, where fixed per-image costs dominate. `p0_07.j2k` has 256 tiles of 128×128, which are reconstructed concurrently; on one thread it takes about 1.45 s. A Linux aarch64 Docker run on the same machine measured 10.4 ms (lossless) and 3.0 ms (lossy) for the gray image; Windows timings are printed by CI.
+JP2K is about 3.8× faster than ImageIO on the gray lossless image, about 2.1× faster on the small RGB lossless image, about 2.7× faster on the sYCC image and about 4.6× faster on the 2048×2048 image. ImageIO stays ahead on the gray lossy image. `p0_07.j2k` has 256 tiles of 128×128, which are reconstructed concurrently; on one thread it takes about 1.45 s. A Linux aarch64 Docker run on the same machine measured 10.4 ms (lossless) and 3.0 ms (lossy) for the gray image; Windows timings are printed by CI.
 
 ## Testing
 
