@@ -77,43 +77,18 @@ struct CodeBlockJob: Sendable {
     }
 }
 
-/// Runs Tier-1 for one tile component. Code-blocks are independent, so
-/// large components are split across child tasks; each worker owns its
-/// scratch and a private budget carved out of the decode budget beforehand.
-/// Results are merged in job order, so output and errors match the serial
-/// path exactly.
+/// Runs Tier-1 for a tile. Code-blocks are independent, so a large tile's
+/// blocks, across all its components, can be split across child tasks; each
+/// worker owns its scratch and a private budget carved out of the decode
+/// budget beforehand. The concurrent run only ever finishes the work
+/// exactly as the serial path would: on any failure it writes nothing and
+/// the caller decodes serially, which raises the error in serial order.
 enum CodeBlockScheduler {
     /// Decodes `jobs`, which all belong to one component, into that
-    /// component's coefficient plane.
-    static func run(_ jobs: [CodeBlockJob], plane: inout [Int32],
-                    context: inout DecodeContext) async throws(JP2KError) {
+    /// component's coefficient plane, one block after another.
+    static func decode(_ jobs: [CodeBlockJob], into plane: inout [Int32],
+                       budget: inout MemoryBudget) throws(JP2KError) {
         guard !jobs.isEmpty else { return }
-        let workers = try workerCount(for: jobs, limit: context.limits.maxThreads,
-                                      threshold: context.limits.parallelSampleThreshold)
-        if workers > 1, try await runParallel(jobs, workers: workers, plane: &plane, context: &context) {
-            return
-        }
-        try runSerial(jobs, plane: &plane, budget: &context.budget)
-    }
-
-    private static func workerCount(for jobs: [CodeBlockJob], limit: Int, threshold: Int) throws(JP2KError) -> Int {
-        var samples = 0
-        for job in jobs { samples = try Checked.add(samples, Checked.mul(job.width, job.height)) }
-        guard samples >= threshold else { return 1 }
-        return max(1, min(limit, jobs.count))
-    }
-
-    private static func scratchLimits(_ jobs: [CodeBlockJob]) -> (width: Int, height: Int) {
-        var width = 1, height = 1
-        for job in jobs {
-            width = max(width, job.maxWidth)
-            height = max(height, job.maxHeight)
-        }
-        return (width, height)
-    }
-
-    private static func runSerial(_ jobs: [CodeBlockJob], plane: inout [Int32],
-                                  budget: inout MemoryBudget) throws(JP2KError) {
         let limits = scratchLimits(jobs)
         var decoder = try CodeBlockDecoder(maxWidth: limits.width, maxHeight: limits.height, budget: &budget)
         do {
@@ -126,6 +101,15 @@ enum CodeBlockScheduler {
             throw error
         }
         decoder.release(from: &budget)
+    }
+
+    private static func scratchLimits(_ jobs: [CodeBlockJob]) -> (width: Int, height: Int) {
+        var width = 1, height = 1
+        for job in jobs {
+            width = max(width, job.maxWidth)
+            height = max(height, job.maxHeight)
+        }
+        return (width, height)
     }
 
     private static func decode(_ job: CodeBlockJob, with decoder: inout CodeBlockDecoder,
@@ -175,11 +159,11 @@ enum CodeBlockScheduler {
     // MARK: - Parallel path
 
     /// What one worker hands back: the coefficients of its jobs in order,
-    /// and the first of its jobs that failed.
+    /// or that one of them failed (or outgrew the worker's share).
     private struct WorkerResult: Sendable {
         let worker: Int
         var outputs: [[Int32]] = []
-        var failure: (job: Int, error: JP2KError)?
+        var failed = false
     }
 
     /// Allocator rounding allowance for one allocation. Small blocks come
@@ -225,35 +209,39 @@ enum CodeBlockScheduler {
         try Checked.ceilDiv(Checked.sub(jobCount, worker), workers)
     }
 
-    /// Returns false when the worker budgets cannot be reserved or a worker
-    /// ran out of its share; the caller then decodes serially, which charges
-    /// exactly what it uses.
-    private static func runParallel(_ jobs: [CodeBlockJob], workers: Int, plane: inout [Int32],
-                                    context: inout DecodeContext) async throws(JP2KError) -> Bool {
+    /// Decodes `jobs` into `planes[job.component]` on up to `maxThreads`
+    /// child tasks. Returns false, with the planes and the budget untouched,
+    /// when the worker budgets cannot be reserved, a worker outgrew its
+    /// share, or any job failed; the caller then decodes serially, which
+    /// charges exactly what it uses and reports the first error in order.
+    static func decodeConcurrently(_ jobs: [CodeBlockJob], into planes: inout [[Int32]],
+                                   context: inout DecodeContext) async -> Bool {
+        let workers = min(context.limits.maxThreads, jobs.count)
+        guard workers > 1 else { return false }
+        do throws(JP2KError) {
+            if try await decodeConcurrently(jobs, workers: workers, into: &planes, context: &context) { return true }
+        } catch {}
+        context.countParallelFallback()
+        return false
+    }
+
+    private static func decodeConcurrently(_ jobs: [CodeBlockJob], workers: Int, into planes: inout [[Int32]],
+                                           context: inout DecodeContext) async throws(JP2KError) -> Bool {
         let limits = scratchLimits(jobs)
         var maxData = 0
         for job in jobs { maxData = max(maxData, job.block.data.count) }
         let scratch = try scratchBytes(width: limits.width, height: limits.height, maxData: maxData)
         // The share list and the result list live until the merge ends, so
         // they are reserved before the shares are computed.
-        var reserved = try Checked.add(rounded(Checked.mul(workers, MemoryLayout<Int>.stride)),
-                                       rounded(Checked.mul(workers, MemoryLayout<WorkerResult?>.stride)))
-        do {
-            try context.budget.reserve(bytes: reserved)
-        } catch {
-            return false
-        }
-        defer { context.budget.release(bytes: reserved) }
+        let lists = try Checked.add(rounded(Checked.mul(workers, MemoryLayout<Int>.stride)),
+                                    rounded(Checked.mul(workers, MemoryLayout<WorkerResult?>.stride)))
+        try context.budget.reserve(bytes: lists)
+        defer { context.budget.release(bytes: lists) }
         let shares = try Self.shares(jobs, workers: workers, scratch: scratch)
         var total = 0
         for share in shares { total = try Checked.add(total, share) }
-        let withShares = try Checked.add(reserved, total)
-        do {
-            try context.budget.reserve(bytes: total)
-        } catch {
-            return false
-        }
-        reserved = withShares
+        try context.budget.reserve(bytes: total)
+        defer { context.budget.release(bytes: total) }
 
         // Indexed by worker, so the merge can find each job's output.
         let results = await withTaskGroup(of: WorkerResult.self, returning: [WorkerResult?].self) { group in
@@ -267,35 +255,25 @@ enum CodeBlockScheduler {
             for await result in group { results[result.worker] = result }
             return results
         }
-
-        // Each worker stops at its first failure and walks its jobs in
-        // increasing order, so its failure is the lowest failing job of its
-        // stride, and the lowest over all workers is the one the serial path
-        // would report: every job below it was decoded by some worker.
-        var failure: (job: Int, error: JP2KError)?
-        for case let result? in results {
-            if let found = result.failure, found.job < (failure?.job ?? Int.max) { failure = found }
-        }
-        if let failure {
-            // A worker that outgrew its share says nothing about the input;
-            // let the serial path decide.
-            if failure.error == .limitExceeded(.memory) { return false }
-            throw failure.error
-        }
-        // Merged in job order, as the serial path writes them.
+        for result in results where result == nil || result?.failed == true { return false }
+        // Every output is checked before the first one is written, so a
+        // false return leaves the planes as they were.
         for index in jobs.indices {
             let job = jobs[index]
-            guard let outputs = results[index % workers]?.outputs else { throw .invalidCodestream(.badCodeBlock) }
             let slot = index / workers
-            guard slot < outputs.count, outputs[slot].count == (try Checked.mul(job.width, job.height)) else {
-                throw .invalidCodestream(.badCodeBlock)
-            }
-            let values = outputs[slot]
-            var row = try firstTarget(job, in: plane)
+            guard job.component >= 0, job.component < planes.count,
+                  let outputs = results[index % workers]?.outputs, slot < outputs.count,
+                  outputs[slot].count == (try Checked.mul(job.width, job.height)) else { return false }
+            _ = try firstTarget(job, in: planes[job.component])
+        }
+        for index in jobs.indices {
+            let job = jobs[index]
+            guard let values = results[index % workers]?.outputs[index / workers] else { return false }
+            var row = try firstTarget(job, in: planes[job.component])
             for source in stride(from: 0, to: values.count, by: max(job.width, 1)) {
                 let rowEnd = try Checked.add(row, job.width)
                 let sourceEnd = try Checked.add(source, job.width)
-                plane.replaceSubrange(row..<rowEnd, with: values[source..<sourceEnd])
+                planes[job.component].replaceSubrange(row..<rowEnd, with: values[source..<sourceEnd])
                 row = try Checked.add(row, job.rowStride)
             }
         }
@@ -309,24 +287,25 @@ enum CodeBlockScheduler {
                                      limits: (width: Int, height: Int), share: Int) -> WorkerResult {
         var budget = MemoryBudget(limit: share)
         var result = WorkerResult(worker: worker)
-        var index = worker
         do throws(JP2KError) {
-            // Failing to set up counts as failing the worker's first job.
             let count = try strideCount(jobs.count, worker: worker, workers: workers)
             result.outputs = try budget.array(repeating: [], count: count)
             var decoder = try CodeBlockDecoder(maxWidth: limits.width, maxHeight: limits.height, budget: &budget)
             var slot = 0
+            var index = worker
             while index < jobs.count {
                 let job = jobs[index]
                 try decode(job, with: &decoder, budget: &budget)
                 var values = try budget.array(repeating: Int32(0), count: Checked.mul(job.width, job.height))
                 for sample in values.indices { values[sample] = coefficient(job, decoder, sample) }
                 result.outputs[slot] = values
-                slot += 1
+                slot = try Checked.add(slot, 1)
                 index = try Checked.add(index, workers)
             }
         } catch {
-            result.failure = (min(index, jobs.count - 1), error)
+            // The serial path will find the error again, in order.
+            result.failed = true
+            result.outputs = []
         }
         return result
     }

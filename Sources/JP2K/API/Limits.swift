@@ -41,9 +41,16 @@ public struct Limits: Sendable, Equatable {
     /// `maxMemoryBytes`; when it does not fit, decoding falls back to one
     /// thread instead of failing.
     public var maxThreads: Int = 8
-    /// Tiles with fewer coded samples stay on one thread, where start-up
-    /// would cost more than it saves. Internal so tests can force either path.
-    var parallelSampleThreshold = 32_768
+    /// Work below which an image or tile stays on one thread, where
+    /// starting child tasks would cost more than it saves. Work is counted
+    /// as coded bytes plus one sixteenth of the samples: Tier-1 time follows
+    /// the coded data, and the samples bound the passes over sparse data.
+    /// Internal so tests can force either path.
+    var parallelWorkThreshold = 2_048
+
+    func warrantsFanOut(codedBytes: Int, samples: Int) throws(JP2KError) -> Bool {
+        try Checked.add(codedBytes, samples / 16) >= parallelWorkThreshold
+    }
 
     public init() {}
 }

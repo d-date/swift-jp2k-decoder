@@ -78,10 +78,14 @@ enum TileDecoder {
     static func reconstruct(_ tile: TileData, header: MainHeader, geometry: TileGeometry,
                             planes: inout [[Int32]], context: inout DecodeContext) async throws(JP2KError) {
         guard planes.count == geometry.components.count else { throw .invalidCodestream(.badSIZ) }
+        let concurrent = await decodeCodeBlocksConcurrently(tile, geometry: geometry, planes: &planes,
+                                                            context: &context)
         for component in geometry.components.indices {
             let coding = tile.parameters.coc[component] ?? tile.parameters.cod.component
-            try await decodeCodeBlocks(tile, component: component, geometry.components[component],
-                                       plane: &planes[component], context: &context)
+            if !concurrent {
+                try decodeCodeBlocks(tile, component: component, geometry: geometry, planes: &planes,
+                                     context: &context)
+            }
             try InverseDWT.decode(&planes[component], resolutions: geometry.components[component].resolutions,
                                   reversible: coding.reversible, budget: &context.budget)
         }
@@ -131,37 +135,61 @@ enum TileDecoder {
         return try Checked.add(planes, transient)
     }
 
-    /// Runs Tier-1 for one component. The job list is charged to the budget
-    /// while it exists.
-    private static func decodeCodeBlocks(_ tile: TileData, component: Int, _ componentGeometry: TileComponent,
-                                         plane: inout [Int32], context: inout DecodeContext) async throws(JP2KError) {
+    /// Runs Tier-1 for one component on this thread. The job list is
+    /// charged to the budget while it exists.
+    private static func decodeCodeBlocks(_ tile: TileData, component: Int, geometry: TileGeometry,
+                                         planes: inout [[Int32]], context: inout DecodeContext) throws(JP2KError) {
         var listBytes = 0
         defer { context.budget.release(bytes: listBytes) }
-        let jobs = try codeBlockJobs(tile, component: component, componentGeometry, planeCount: plane.count,
-                                     listBytes: &listBytes, budget: &context.budget)
-        if jobs.isEmpty { return }
-        try await CodeBlockScheduler.run(jobs, plane: &plane, context: &context)
+        let jobs = try codeBlockJobs(tile, components: CollectionOfOne(component), geometry: geometry,
+                                     planes: planes, listBytes: &listBytes, budget: &context.budget)
+        try CodeBlockScheduler.decode(jobs, into: &planes[component], budget: &context.budget)
     }
 
-    /// Lists the component's code-blocks with coded passes in OpenJPEG's
-    /// decode order. Errors the serial loop used to raise before or after
-    /// decoding a block are attached to that block's job, so they surface in
-    /// the same order whichever path decodes it. `listBytes` records what was
-    /// charged for the list, including any capacity rounding.
-    private static func codeBlockJobs(_ tile: TileData, component: Int, _ componentGeometry: borrowing TileComponent,
-                                      planeCount: Int, listBytes: inout Int,
+    /// Runs Tier-1 for every component of the tile in one fan-out, when the
+    /// tile is large enough for it to pay off. False leaves the planes as
+    /// they were, for the serial loop: that includes any error, which the
+    /// serial loop then raises in its own order.
+    private static func decodeCodeBlocksConcurrently(_ tile: TileData, geometry: TileGeometry,
+                                                     planes: inout [[Int32]],
+                                                     context: inout DecodeContext) async -> Bool {
+        guard context.limits.maxThreads > 1 else { return false }
+        var listBytes = 0
+        defer { context.budget.release(bytes: listBytes) }
+        let jobs: [CodeBlockJob]
+        do {
+            var samples = 0
+            for plane in planes { samples = try Checked.add(samples, plane.count) }
+            guard try context.limits.warrantsFanOut(codedBytes: tile.body.count, samples: samples) else {
+                return false
+            }
+            jobs = try codeBlockJobs(tile, components: geometry.components.indices, geometry: geometry,
+                                     planes: planes, listBytes: &listBytes, budget: &context.budget)
+        } catch {
+            return false
+        }
+        return await CodeBlockScheduler.decodeConcurrently(jobs, into: &planes, context: &context)
+    }
+
+    /// Lists the components' code-blocks with coded passes in OpenJPEG's
+    /// decode order, component by component. Errors the serial loop used to
+    /// raise before or after decoding a block are attached to that block's
+    /// job, so they surface in the same order whichever path decodes it.
+    /// `listBytes` records what was charged for the list, including any
+    /// capacity rounding.
+    private static func codeBlockJobs(_ tile: TileData, components: some Collection<Int>,
+                                      geometry: borrowing TileGeometry,
+                                      planes: borrowing [[Int32]], listBytes: inout Int,
                                       budget: inout MemoryBudget) throws(JP2KError) -> [CodeBlockJob] {
-        let coding = tile.parameters.coc[component] ?? tile.parameters.cod.component
-        let roi = tile.parameters.rgn[component] ?? 0
-        let width = try Checked.sub(componentGeometry.x1, componentGeometry.x0)
-        let height = try Checked.sub(componentGeometry.y1, componentGeometry.y0)
-        let maxWidth = try Checked.shiftLeft(1, coding.codeBlockWidthExp)
-        let maxHeight = try Checked.shiftLeft(1, coding.codeBlockHeightExp)
         var count = 0
-        for resolution in componentGeometry.resolutions {
-            for band in resolution.bands {
-                for precinct in band.precincts {
-                    for block in precinct.codeBlocks where block.totalPasses > 0 { count = try Checked.add(count, 1) }
+        for component in components {
+            for resolution in geometry.components[component].resolutions {
+                for band in resolution.bands {
+                    for precinct in band.precincts {
+                        for block in precinct.codeBlocks where block.totalPasses > 0 {
+                            count = try Checked.add(count, 1)
+                        }
+                    }
                 }
             }
         }
@@ -176,6 +204,21 @@ enum TileDecoder {
             try budget.reserve(bytes: actual - requested)
             listBytes = actual
         }
+        for component in components {
+            try appendJobs(tile, component: component, geometry.components[component],
+                           planeCount: planes[component].count, to: &jobs)
+        }
+        return jobs
+    }
+
+    private static func appendJobs(_ tile: TileData, component: Int, _ componentGeometry: borrowing TileComponent,
+                                   planeCount: Int, to jobs: inout [CodeBlockJob]) throws(JP2KError) {
+        let coding = tile.parameters.coc[component] ?? tile.parameters.cod.component
+        let roi = tile.parameters.rgn[component] ?? 0
+        let width = try Checked.sub(componentGeometry.x1, componentGeometry.x0)
+        let height = try Checked.sub(componentGeometry.y1, componentGeometry.y0)
+        let maxWidth = try Checked.shiftLeft(1, coding.codeBlockWidthExp)
+        let maxHeight = try Checked.shiftLeft(1, coding.codeBlockHeightExp)
         for resolution in componentGeometry.resolutions.indices {
             let bands = componentGeometry.resolutions[resolution].bands
             for band in bands {
@@ -202,7 +245,6 @@ enum TileDecoder {
                 }
             }
         }
-        return jobs
     }
 
     /// Validates that the block lands inside the component's coefficient grid,

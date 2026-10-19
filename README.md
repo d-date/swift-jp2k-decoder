@@ -63,7 +63,7 @@ let crop = try await decoder.decodePixels(rawBytes, color: .assume(.gray8),
 | `maxPacketIterations` | 4,194,304 | Packet scan steps, including skipped positions |
 | `maxCodingPasses` | 8,388,608 | Code-block coding passes |
 | `maxMarkerDataBytes` | 8 MiB | Retained marker data |
-| `maxThreads` | 8 | Threads for code-block decoding within a tile; 1 is serial |
+| `maxThreads` | 8 | Child tasks for decoding tiles or code-blocks; 1 is serial |
 
 ## Safety and platforms
 
@@ -88,7 +88,9 @@ Apple Silicon release build, `swift run -c release jp2k-bench`: five warm-ups an
 
 The two conformance rows need `JP2K_CONFORMANCE_DIR`.
 
-Up to `maxThreads` child tasks share the work: an image with several tiles reconstructs one tile per task (packet headers are still read in order first), and a single-tile image splits its code-blocks across tasks. Images and tiles with fewer than 32,768 samples stay on one thread. The output is identical for every thread count, and the same input fails with the same error. Each task's working memory is reserved from `maxMemoryBytes` first; if it does not fit, or a task outgrows it, decoding falls back to one thread.
+Up to `maxThreads` child tasks share the work: an image with several tiles reconstructs one tile per task (packet headers are still read in order first), and a single-tile image splits the code-blocks of all its components across tasks. Images and tiles with less than about 2 KB of coded data (counting one sixteenth of a byte per sample) stay on one thread, where starting tasks would cost more than it saves. The output is identical for every thread count, and the same input fails with the same error. Each task's working memory is reserved from `maxMemoryBytes` first; if it does not fit, a task outgrows it, or the input turns out to be damaged, decoding falls back to one thread.
+
+Concurrency shortens each decode but adds a little CPU time for starting tasks. When many images are decoded at once, for example on a server, set `maxThreads` to 1 and decode images in parallel instead, which gives the best total throughput.
 
 JP2K is about 3.8× faster than ImageIO on the gray lossless image, about 2.6× faster on the sYCC image and about 4.8× faster on the 2048×2048 image. ImageIO stays ahead on the small lossy and RGB cases, where fixed per-image costs dominate. `p0_07.j2k` has 256 tiles of 128×128, which are reconstructed concurrently; on one thread it takes about 1.45 s. A Linux aarch64 Docker run on the same machine measured 10.4 ms (lossless) and 3.0 ms (lossy) for the gray image; Windows timings are printed by CI.
 

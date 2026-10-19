@@ -150,11 +150,15 @@ struct LimitBoundaryTests {
 
     @Test func workLimits() async throws {
         let bytes = try fixture("levels-0.j2k")
-        let measured = try await JP2KDecoder().decodeComponentsWithMetrics(bytes)
+        // A concurrent decode's peak includes its worker shares; below them
+        // it falls back to one thread, so the serial peak is the minimum.
+        var serial = Limits()
+        serial.maxThreads = 1
+        let measured = try await JP2KDecoder(limits: serial).decodeComponentsWithMetrics(bytes)
         // Memory: the recorded peak includes allocator rounding, which varies
         // by platform, so the exact one-byte boundary is not portable. Pin it
         // with a margin instead: the measured peak passes and 90% of it fails
-        // with .memory.
+        // with .memory, whatever the thread count.
         var memoryLimits = Limits()
         memoryLimits.maxMemoryBytes = measured.1.peakMemoryBytes
         _ = try await JP2KDecoder(limits: memoryLimits).decodeComponents(bytes)

@@ -192,7 +192,9 @@ public struct JP2KDecoder: Sendable {
         let image = header.geometry
         let samples = try Checked.mul(Checked.mul(Checked.sub(image.x1, image.x0), Checked.sub(image.y1, image.y0)),
                                       image.components.count)
-        return samples >= limits.parallelSampleThreshold
+        var codedBytes = 0
+        for tile in tileParts { codedBytes = try Checked.add(codedBytes, tile.body.count) }
+        return try limits.warrantsFanOut(codedBytes: codedBytes, samples: samples)
     }
 }
 

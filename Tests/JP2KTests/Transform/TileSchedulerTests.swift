@@ -7,7 +7,7 @@ struct TileSchedulerTests {
         var limits = Limits()
         limits.maxThreads = threads
         // Small fixtures stay serial by default; force the tile scheduler.
-        limits.parallelSampleThreshold = 0
+        limits.parallelWorkThreshold = 0
         limits.maxPixels = 1 << 16
         limits.maxCodingPasses = 1 << 16
         limits.maxPacketIterations = 1 << 16
