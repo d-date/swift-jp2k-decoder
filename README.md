@@ -12,7 +12,16 @@ Part 2, HTJ2K, component precision above 16 bits, reduced-resolution decoding, a
 
 ## Use
 
-Requires Swift 6.4 or later; on Apple platforms, macOS 26, iOS 26, tvOS 26, watchOS 26 or visionOS 26 (the Tier-1 loops use `MutableSpan`). Add this repository as a Swift package dependency and import `JP2K`:
+Requires the Swift 6.4.1 toolchain or later. Supported platforms:
+
+| Platform | Minimum |
+| --- | --- |
+| Linux | Swift 6.4.1 toolchain |
+| Windows x64 and ARM64 | Swift 6.4.1 toolchain |
+| Android | Swift 6.4.1 toolchain with its Android Swift SDK |
+| macOS, iOS, tvOS, watchOS, visionOS | 26 (the Tier-1 loops use `MutableSpan`, which ships with the OS there) |
+
+Add this repository as a Swift package dependency and import `JP2K`:
 
 ```swift
 import Foundation
@@ -62,7 +71,7 @@ Verify the source of the data before decoding when you can. The decoder validate
 
 `readInfo` already charges the decoded component planes to `maxMemoryBytes`, so an image that could not be decoded within the budget is rejected before any decoding work. As OpenJPEG does, a codestream that ends exactly after its last tile-part without an EOC marker is accepted; any other truncation is an error.
 
-The package targets Windows x64 and ARM64, Linux, Android, macOS, and iOS. CI tests Linux, Windows x64 and ARM64, and an Android emulator, and checks lint and the public API listing. Apple platforms are verified locally; CI has no macOS runner.
+CI runs the full test suite on Linux, Windows x64 and ARM64, and an Android emulator, and checks lint and the public API listing. macOS and the iOS simulator are tested locally; CI has no macOS runner. tvOS, watchOS and visionOS are declared in the package but not tested.
 
 ## Performance
 
