@@ -19,7 +19,7 @@ Requires the Swift 6.4.1 toolchain or later. Supported platforms:
 | Linux | Swift 6.4.1 toolchain |
 | Windows x64 and ARM64 | Swift 6.4.1 toolchain |
 | Android | Swift 6.4.1 toolchain with its Android Swift SDK |
-| macOS, iOS, tvOS, watchOS, visionOS | 26 (the Tier-1 loops use `MutableSpan`, which ships with the OS there) |
+| macOS, iOS, tvOS, watchOS, visionOS | 26 |
 
 Add this repository as a Swift package dependency and import `JP2K`:
 
